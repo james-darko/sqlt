@@ -7,49 +7,27 @@ import (
 )
 
 func Tx(db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
-	return transaction(db, false, fn)
+	return transaction(context.Background(), db, false, fn)
 }
 
-func TxContext(ctx context.Context, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
-	return transactionContext(ctx, db, false, fn)
+func Txc(ctx context.Context, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
+	return transaction(ctx, db, false, fn)
 }
 
 func TxImm(db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
-	return transaction(db, true, fn)
+	return transaction(context.Background(), db, true, fn)
 }
 
-func TxImmContext(ctx context.Context, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
-	return transactionContext(ctx, db, true, fn)
+func TxcImm(ctx context.Context, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
+	return transaction(ctx, db, true, fn)
 }
 
-func transaction(db *sqlx.DB, write bool, fn func(tx *sqlx.Tx) error) error {
-	tx, err := db.Beginx()
+func transaction(ctx context.Context, db *sqlx.DB, write bool, fn func(tx *sqlx.Tx) error) error {
+	conn, err := db.Connx(ctx)
 	if err != nil {
 		return err
 	}
-	if write {
-		driver := db.DriverName()
-		if driver == "libsql" || driver == "sqlite3" {
-			_, err = tx.Exec("ROLLBACK")
-			if err != nil {
-				return err
-			}
-			_, err = tx.Exec("BEGIN IMMEDIATE")
-			if err != nil {
-				return err
-			}
-		}
-	}
-	defer tx.Rollback()
-	err = fn(tx)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-func transactionContext(ctx context.Context, db *sqlx.DB, write bool, fn func(tx *sqlx.Tx) error) error {
-	tx, err := db.BeginTxx(ctx, nil)
+	tx, err := conn.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
