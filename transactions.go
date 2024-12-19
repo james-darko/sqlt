@@ -27,6 +27,7 @@ func transaction(ctx context.Context, db *sqlx.DB, write bool, fn func(tx *sqlx.
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 	tx, err := conn.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
