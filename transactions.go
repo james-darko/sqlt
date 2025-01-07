@@ -23,12 +23,7 @@ func TxcImm(ctx context.Context, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error 
 }
 
 func transaction(ctx context.Context, db *sqlx.DB, write bool, fn func(tx *sqlx.Tx) error) error {
-	conn, err := db.Connx(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	tx, err := conn.BeginTxx(ctx, nil)
+	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
