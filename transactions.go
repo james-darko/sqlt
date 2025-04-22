@@ -2,48 +2,58 @@ package sqlt
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/jmoiron/sqlx"
 )
 
-func Tx(db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
-	return transaction(context.Background(), db, false, fn)
-}
-
-func Txc(ctx context.Context, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
-	return transaction(ctx, db, false, fn)
-}
-
-func TxImm(db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
-	return transaction(context.Background(), db, true, fn)
-}
-
-func TxcImm(ctx context.Context, db *sqlx.DB, fn func(tx *sqlx.Tx) error) error {
-	return transaction(ctx, db, true, fn)
-}
-
-func transaction(ctx context.Context, db *sqlx.DB, write bool, fn func(tx *sqlx.Tx) error) error {
-	tx, err := db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
+func transaction(ctx context.Context, db *sqlx.DB, imm bool, fn func(conn Tx) error) (rErr error) {
+	driver := db.DriverName()
+	if driver != "libsql" && driver != "sqlite3" {
+		return fmt.Errorf("transactionImm is only supported for libsql and sqlite3 drivers")
 	}
-	if write {
-		driver := db.DriverName()
-		if driver == "libsql" || driver == "sqlite3" {
-			_, err = tx.Exec("ROLLBACK")
-			if err != nil {
-				return err
+	conn, err := db.Connx(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get connection: %w", err)
+	}
+	defer conn.Close()
+	if imm {
+		_, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+	} else {
+		_, err = conn.ExecContext(ctx, "BEGIN")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer func() {
+		if err := recover(); err != nil {
+			if _, rollbackErr := conn.ExecContext(ctx, "ROLLBACK"); rollbackErr != nil {
+				fmt.Printf("failed to rollback transaction in panic: %v", rollbackErr)
 			}
-			_, err = tx.Exec("BEGIN IMMEDIATE")
-			if err != nil {
-				return err
+			var e Error
+			if ok := errors.As(err.(error), &e); ok {
+				rErr = e
+			} else {
+				panic(err) // Re-panic to propagate the error
 			}
 		}
+	}()
+	tx := &sqlxTx{
+		ctx:        ctx,
+		conn:       conn,
+		driverName: driver,
 	}
-	defer tx.Rollback()
 	err = fn(tx)
 	if err != nil {
+		if _, rollbackErr := conn.ExecContext(ctx, "ROLLBACK"); rollbackErr != nil {
+			return fmt.Errorf("failed to rollback transaction: %w", rollbackErr)
+		}
 		return err
 	}
-	return tx.Commit()
+	_, err = conn.ExecContext(ctx, "COMMIT")
+	if err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	return nil
 }
