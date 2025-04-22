@@ -17,11 +17,11 @@ type Tx interface {
 	QueryRow(query string, args ...any) *sqlx.Row
 	MustQueryRow(query string, args ...any) *sqlx.Row
 	Get(dest any, query string, args ...any) error
-	MustGet(dest any, query string, args ...any) error
+	MustGet(dest any, query string, args ...any)
 	Select(dest any, query string, args ...any) error
-	MustSelect(dest any, query string, args ...any) error
+	MustSelect(dest any, query string, args ...any)
 	SelectIn(dest any, query string, args ...any) error
-	MustSelectIn(dest any, query string, args ...any) error
+	MustSelectIn(dest any, query string, args ...any)
 	// Prepare(query string) (*sql.Stmt, error)
 	// Preparex(query string) (*sqlx.Stmt, error)
 	// Stmtx(st any) *sqlx.Stmt
@@ -86,24 +86,22 @@ func (tx *sqlxTx) Get(dest any, query string, args ...any) error {
 	return tx.conn.GetContext(tx.ctx, dest, query, args...)
 }
 
-func (tx *sqlxTx) MustGet(dest any, query string, args ...any) error {
+func (tx *sqlxTx) MustGet(dest any, query string, args ...any) {
 	err := tx.Get(dest, query, args...)
 	if err != nil {
 		panic(Error{err})
 	}
-	return err
 }
 
 func (tx *sqlxTx) Select(dest any, query string, args ...any) error {
 	return tx.conn.SelectContext(tx.ctx, dest, query, args...)
 }
 
-func (tx *sqlxTx) MustSelect(dest any, query string, args ...any) error {
+func (tx *sqlxTx) MustSelect(dest any, query string, args ...any) {
 	err := tx.Select(dest, query, args...)
 	if err != nil {
 		panic(Error{err})
 	}
-	return err
 }
 
 func (tx *sqlxTx) SelectIn(dest any, query string, args ...any) error {
@@ -114,12 +112,11 @@ func (tx *sqlxTx) SelectIn(dest any, query string, args ...any) error {
 	return tx.conn.SelectContext(tx.ctx, dest, p, q)
 }
 
-func (tx *sqlxTx) MustSelectIn(dest any, query string, args ...any) error {
+func (tx *sqlxTx) MustSelectIn(dest any, query string, args ...any) {
 	err := tx.SelectIn(dest, query, args...)
 	if err != nil {
 		panic(Error{err})
 	}
-	return err
 }
 
 // func (tx *sqlxTx) Prepare(query string) (*sql.Stmt, error) {
