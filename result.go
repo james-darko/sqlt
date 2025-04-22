@@ -6,18 +6,18 @@ type Result interface {
 	// LastInsertId returns the last inserted ID.
 	// It is only valid after an INSERT statement.
 	LastInsertId() (int64, error)
-	// LastInsertIdMust returns the last inserted ID.
+	// MustLastInsertId returns the last inserted ID.
 	// It is only valid after an INSERT statement.
 	// It panics if the last inserted ID is not available.
-	LastInsertIdMust() int64
+	MustLastInsertId() int64
 
 	// RowsAffected returns the number of rows affected by the last statement.
 	// It is only valid after an UPDATE or DELETE statement.
 	RowsAffected() (int64, error)
-	// RowsAffectedMust returns the number of rows affected by the last statement.
+	// MustRowsAffected returns the number of rows affected by the last statement.
 	// It is only valid after an UPDATE or DELETE statement.
 	// It panics if the number of rows affected is not available.
-	RowsAffectedMust() int64
+	MustRowsAffected() int64
 }
 
 type sqltResult struct {
@@ -32,7 +32,7 @@ func (r sqltResult) LastInsertId() (int64, error) {
 	return id, nil
 }
 
-func (r sqltResult) LastInsertIdMust() int64 {
+func (r sqltResult) MustLastInsertId() int64 {
 	id, err := r.LastInsertId()
 	if err != nil {
 		panic(Error{err})
@@ -48,7 +48,7 @@ func (r sqltResult) RowsAffected() (int64, error) {
 	return affected, nil
 }
 
-func (r sqltResult) RowsAffectedMust() int64 {
+func (r sqltResult) MustRowsAffected() int64 {
 	affected, err := r.RowsAffected()
 	if err != nil {
 		panic(Error{err})
