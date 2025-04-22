@@ -22,7 +22,9 @@ type DB interface {
 	DriverName() string
 	BindNamed(query string, arg any) (string, []any, error)
 	Get(dest any, query string, args ...any) error
+	GetContext(ctx context.Context, dest any, query string, args ...any) error
 	Select(dest any, query string, args ...any) error
+	SelectContext(ctx context.Context, dest any, query string, args ...any) error
 	NamedExec(query string, arg any) (sql.Result, error)
 	NamedQuery(query string, arg any) (*sqlx.Rows, error)
 
@@ -76,8 +78,16 @@ func (s *sqlxDB) Get(dest any, query string, args ...any) error {
 	return s.db.Get(dest, query, args...)
 }
 
+func (s *sqlxDB) GetContext(ctx context.Context, dest any, query string, args ...any) error {
+	return s.db.GetContext(ctx, dest, query, args...)
+}
+
 func (s *sqlxDB) Select(dest any, query string, args ...any) error {
 	return s.db.Select(dest, query, args...)
+}
+
+func (s *sqlxDB) SelectContext(ctx context.Context, dest any, query string, args ...any) error {
+	return s.db.SelectContext(ctx, dest, query, args...)
 }
 
 func (s *sqlxDB) NamedExec(query string, arg any) (sql.Result, error) {
