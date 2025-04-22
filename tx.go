@@ -10,8 +10,8 @@ import (
 type Tx interface {
 	// Commit() error
 	// Rollback() error
-	Exec(query string, args ...any) (sql.Result, error)
-	ExecMust(query string, args ...any) sql.Result
+	Exec(query string, args ...any) (Result, error)
+	ExecMust(query string, args ...any) Result
 	Query(query string, args ...any) (*sqlx.Rows, error)
 	QueryMust(query string, args ...any) *sqlx.Rows
 	QueryRow(query string, args ...any) *sqlx.Row
@@ -45,16 +45,17 @@ type sqlxTx struct {
 // 	return err
 // }
 
-func (tx *sqlxTx) Exec(query string, args ...any) (sql.Result, error) {
-	return tx.conn.ExecContext(tx.ctx, query, args...)
+func (tx *sqlxTx) Exec(query string, args ...any) (Result, error) {
+	r, err := tx.conn.ExecContext(tx.ctx, query, args...)
+	return sqltResult{r}, err
 }
 
-func (tx *sqlxTx) ExecMust(query string, args ...any) sql.Result {
+func (tx *sqlxTx) ExecMust(query string, args ...any) Result {
 	res, err := tx.Exec(query, args...)
 	if err != nil {
 		panic(Error{err})
 	}
-	return res
+	return sqltResult{res}
 }
 
 func (tx *sqlxTx) Query(query string, args ...any) (*sqlx.Rows, error) {

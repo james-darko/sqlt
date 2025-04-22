@@ -13,7 +13,7 @@ func Wrap(db *sqlx.DB) DB {
 
 type DB interface {
 	SQLX() *sqlx.DB
-	Exec(query string, args ...any) (sql.Result, error)
+	Exec(query string, args ...any) (Result, error)
 	Query(query string, args ...any) (*sqlx.Rows, error)
 	QueryRow(query string, args ...any) *sqlx.Row
 	Prepare(query string) (*sqlx.Stmt, error)
@@ -42,8 +42,12 @@ func (s *sqlxDB) SQLX() *sqlx.DB {
 	return s.db
 }
 
-func (s *sqlxDB) Exec(query string, args ...any) (sql.Result, error) {
-	return s.db.Exec(query, args...)
+func (s *sqlxDB) Exec(query string, args ...any) (Result, error) {
+	r, err := s.db.Exec(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return sqltResult{r}, nil
 }
 
 func (s *sqlxDB) Query(query string, args ...any) (*sqlx.Rows, error) {
