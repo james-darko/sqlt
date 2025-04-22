@@ -16,6 +16,8 @@ type Tx interface {
 	QueryMust(query string, args ...any) *sqlx.Rows
 	QueryRow(query string, args ...any) *sqlx.Row
 	QueryRowMust(query string, args ...any) *sqlx.Row
+	Get(dest any, query string, args ...any) error
+	GetMust(dest any, query string, args ...any) error
 	Select(dest any, query string, args ...any) error
 	SelectMust(dest any, query string, args ...any) error
 	SelectIn(dest any, query string, args ...any) error
@@ -77,6 +79,18 @@ func (tx *sqlxTx) QueryRowMust(query string, args ...any) *sqlx.Row {
 		panic(Error{err: sql.ErrNoRows})
 	}
 	return row
+}
+
+func (tx *sqlxTx) Get(dest any, query string, args ...any) error {
+	return tx.conn.GetContext(tx.ctx, dest, query, args...)
+}
+
+func (tx *sqlxTx) GetMust(dest any, query string, args ...any) error {
+	err := tx.Get(dest, query, args...)
+	if err != nil {
+		panic(Error{err})
+	}
+	return err
 }
 
 func (tx *sqlxTx) Select(dest any, query string, args ...any) error {
