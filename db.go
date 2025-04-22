@@ -7,7 +7,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-func WrapSQLX(db *sqlx.DB) DB {
+func Wrap(db *sqlx.DB) DB {
 	return &sqlxDB{db: db}
 }
 
