@@ -28,6 +28,7 @@ type DB interface {
 	SelectContext(ctx context.Context, dest any, query string, args ...any) error
 	NamedExec(query string, arg any) (sql.Result, error)
 	NamedQuery(query string, arg any) (*sqlx.Rows, error)
+	Close() error
 
 	Tx(fn func(tx Tx) error) error
 	TxImm(fn func(tx Tx) error) error
@@ -109,6 +110,10 @@ func (s *sqlxDB) NamedExec(query string, arg any) (sql.Result, error) {
 
 func (s *sqlxDB) NamedQuery(query string, arg any) (*sqlx.Rows, error) {
 	return s.db.NamedQuery(query, arg)
+}
+
+func (s *sqlxDB) Close() error {
+	return s.db.Close()
 }
 
 func (s *sqlxDB) Tx(fn func(tx Tx) error) error {
