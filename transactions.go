@@ -27,6 +27,9 @@ func transaction(ctx context.Context, db *sqlx.DB, imm bool, fn func(conn Tx) er
 			}
 		}
 	}()
+	if imm {
+		_, _ = tx.Exec("UPDATE begin_immediate SET v = 1")
+	}
 	t := &txWrapper{
 		tx: tx,
 	}
