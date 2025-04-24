@@ -125,9 +125,9 @@ func (s *sqlxDB) Txc(ctx context.Context, fn func(tx Tx) error) error {
 }
 
 func (s *sqlxDB) TxImm(fn func(tx Tx) error) error {
-	return transaction(context.Background(), s.db, false, fn)
+	return transaction(context.Background(), s.db, true, fn)
 }
 
 func (s *sqlxDB) TxcImm(ctx context.Context, fn func(tx Tx) error) error {
-	return transaction(ctx, s.db, false, fn)
+	return transaction(ctx, s.db, true, fn)
 }
