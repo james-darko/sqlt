@@ -123,3 +123,11 @@ func (tx *txWrapper) MustSelectIn(dest any, query string, args ...any) {
 		panic(Error{err})
 	}
 }
+
+func (tx *txWrapper) NamedExec(query string, arg any) (Result, error) {
+	r, err := tx.tx.NamedExec(query, arg)
+	if err != nil {
+		return nil, err
+	}
+	return sqltResult{r}, nil
+}

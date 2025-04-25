@@ -22,6 +22,7 @@ type Tx interface {
 	MustSelect(dest any, query string, args ...any)
 	SelectIn(dest any, query string, args ...any) error
 	MustSelectIn(dest any, query string, args ...any)
+	NamedExec(query string, arg any) (Result, error)
 	// Prepare(query string) (*sql.Stmt, error)
 	// Preparex(query string) (*sqlx.Stmt, error)
 	// Stmtx(st any) *sqlx.Stmt
@@ -129,6 +130,14 @@ func (tx *sqlxTx) MustSelectIn(dest any, query string, args ...any) {
 //
 // func (tx *sqlxTx) Stmtx(st any) *sqlx.Stmt {
 // 	return tx.conn.Stmtx(st)
+// }
+
+// func (tx *sqlxTx) NamedExec(query string, arg any) (Result, error) {
+// 	r, err := tx.conn.NamedExec(tx.ctx, query, arg)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return sqltResult{r}, nil
 // }
 
 func (tx *sqlxTx) Rebind(query string) string {
