@@ -11,6 +11,14 @@ func Wrap(db *sqlx.DB) DB {
 	return &sqlxDB{db: db}
 }
 
+func Open(driverName, dataSourceName string) (DB, error) {
+	db, err := sqlx.Open(driverName, dataSourceName)
+	if err != nil {
+		return nil, err
+	}
+	return &sqlxDB{db: db}, nil
+}
+
 type DB interface {
 	SQLX() *sqlx.DB
 	Exec(query string, args ...any) (Result, error)
