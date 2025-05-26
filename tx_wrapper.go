@@ -114,7 +114,7 @@ func (tx *txWrapper) SelectIn(dest any, query string, args ...any) error {
 	if err != nil {
 		return err
 	}
-	return tx.tx.Select(dest, p, q)
+	return tx.tx.Select(dest, p, q...)
 }
 
 func (tx *txWrapper) MustSelectIn(dest any, query string, args ...any) {

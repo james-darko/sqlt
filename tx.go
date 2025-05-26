@@ -3,6 +3,7 @@ package sqlt
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -106,11 +107,11 @@ func (tx *sqlxTx) MustSelect(dest any, query string, args ...any) {
 }
 
 func (tx *sqlxTx) SelectIn(dest any, query string, args ...any) error {
-	p, q, err := sqlx.In(query, args...)
+	q, params, err := sqlx.In(query, args)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to generate IN query: %w", err)
 	}
-	return tx.conn.SelectContext(tx.ctx, dest, p, q)
+	return tx.conn.SelectContext(tx.ctx, dest, q, params...)
 }
 
 func (tx *sqlxTx) MustSelectIn(dest any, query string, args ...any) {
@@ -129,7 +130,7 @@ func (tx *sqlxTx) MustSelectIn(dest any, query string, args ...any) {
 // }
 //
 // func (tx *sqlxTx) Stmtx(st any) *sqlx.Stmt {
-// 	return tx.conn.Stmtx(st)
+// 	return tx.conn.Stmtx(st
 // }
 
 // func (tx *sqlxTx) NamedExec(query string, arg any) (Result, error) {
