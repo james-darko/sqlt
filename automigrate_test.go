@@ -6,30 +6,27 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	// "os" // No longer directly needed
 
-	"github.com/jmoiron/sqlx" // Needed for the new getTestDB helper
-	_ "github.com/mattn/go-sqlite3" // DB driver
+	"github.com/jmoiron/sqlx"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/james-darko/gort" // Added gort import
+	"github.com/james-darko/gort"
 	"github.com/james-darko/sqlt"
 )
 
-// Re-introduced getTestDB helper function
 func getTestDB(t *testing.T) sqlt.DB {
 	db, err := sqlx.Open("sqlite3", "file::memory:?_foreign_keys=on")
 	require.NoError(t, err, "Failed to open in-memory database")
 	return sqlt.Wrap(db)
 }
 
-
 // Helper function to check if a database object exists (can be shared)
 func objectExists(t *testing.T, db sqlt.DBReader, objType string, objName string) bool {
 	var count int
 	query := fmt.Sprintf("SELECT COUNT(*) FROM sqlite_master WHERE type = '%s' AND name = '%s'", objType, objName)
-	err := db.GetContext(gort.Context(), &count, query)  // Replaced context.Background()
+	err := db.GetContext(gort.Context(), &count, query) // Replaced context.Background()
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false
@@ -41,25 +38,24 @@ func objectExists(t *testing.T, db sqlt.DBReader, objType string, objName string
 
 // Helper to get SQL definition of an object (can be shared)
 func getObjectSQL(t *testing.T, db sqlt.DBReader, objName string) string {
-	var sqlDef string 
+	var sqlDef string
 	err := db.GetContext(gort.Context(), &sqlDef, "SELECT sql FROM sqlite_master WHERE name = ?", objName) // Replaced context.Background()
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ""
 		}
-		t.Logf("Error getting SQL for object %s: %v", objName, err) 
+		t.Logf("Error getting SQL for object %s: %v", objName, err)
 		return ""
 	}
 	return sqlDef
 }
-
 
 // --- Test Cases For AutoMigrate Start Here ---
 
 func TestAutoMigrate_PerfectMatch(t *testing.T) {
 	t.Parallel()
 	wrappedDB := getTestDB(t)
-	defer wrappedDB.Close() 
+	defer wrappedDB.Close()
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
@@ -72,7 +68,7 @@ CREATE INDEX idx_users_name ON users (name);
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
-	targetSchema := initialSchema 
+	targetSchema := initialSchema
 
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
@@ -88,18 +84,17 @@ func TestAutoMigrate_EmptyDB_CreateAll(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	targetSchema := `
-CREATE TABLE items (
-    item_id INTEGER PRIMARY KEY,
-    description TEXT,
-    price REAL
-);
-CREATE INDEX idx_items_description ON items (description);
-CREATE VIEW cheap_items AS SELECT item_id, description FROM items WHERE price < 10.0;
-CREATE TRIGGER update_item_price AFTER UPDATE ON items
-BEGIN
-    UPDATE items SET price = NEW.price WHERE item_id = OLD.item_id;
-END;
-`
+		CREATE TABLE items (
+		    item_id INTEGER PRIMARY KEY,
+		    description TEXT,
+		    price REAL
+		);
+		CREATE INDEX idx_items_description ON items (description);
+		CREATE VIEW cheap_items AS SELECT item_id, description FROM items WHERE price < 10.0;
+		CREATE TRIGGER update_item_price AFTER UPDATE ON items
+		BEGIN
+		    UPDATE items SET price = NEW.price WHERE item_id = OLD.item_id;
+		END;`
 	err := sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 
@@ -119,11 +114,10 @@ func TestAutoMigrate_EmptySchema_DeleteAll(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE items (item_id INTEGER PRIMARY KEY, description TEXT);
-CREATE INDEX idx_items_desc ON items (description);
-CREATE VIEW items_view AS SELECT description FROM items;
-CREATE TRIGGER items_trigger AFTER INSERT ON items BEGIN SELECT 1; END;
-`
+		CREATE TABLE items (item_id INTEGER PRIMARY KEY, description TEXT);
+		CREATE INDEX idx_items_desc ON items (description);
+		CREATE VIEW items_view AS SELECT description FROM items;
+		CREATE TRIGGER items_trigger AFTER INSERT ON items BEGIN SELECT 1; END;`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
@@ -136,7 +130,7 @@ CREATE TRIGGER items_trigger AFTER INSERT ON items BEGIN SELECT 1; END;
 	assert.False(t, objectExists(t, wrappedDB, "index", "idx_items_desc"), "Index 'idx_items_desc' should not exist")
 	assert.False(t, objectExists(t, wrappedDB, "view", "items_view"), "View 'items_view' should not exist")
 	assert.False(t, objectExists(t, wrappedDB, "trigger", "items_trigger"), "Trigger 'items_trigger' should not exist")
-	
+
 	err = sqlt.Verify(ctx, wrappedDB, strings.NewReader(emptySchema)) // Use ctx
 	assert.NoError(t, err, "Verify with empty schema should pass")
 }
@@ -156,7 +150,7 @@ func TestAutoMigrate_TableColumnReorder(t *testing.T) {
 	_, err = wrappedDB.ExecContext(ctx, "INSERT INTO users (id, name, email) VALUES (2, 'Bob', 'bob@example.com')") // Use ctx
 	require.NoError(t, err)
 
-	targetSchema := `CREATE TABLE users (name TEXT, id INTEGER PRIMARY KEY, email TEXT);` 
+	targetSchema := `CREATE TABLE users (name TEXT, id INTEGER PRIMARY KEY, email TEXT);`
 
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
@@ -173,8 +167,12 @@ func TestAutoMigrate_TableColumnReorder(t *testing.T) {
 	err = wrappedDB.SelectContext(ctx, &users, "SELECT id, name, email FROM users ORDER BY id") // Use ctx
 	require.NoError(t, err)
 	require.Len(t, users, 2)
-	assert.Equal(t, 1, users[0].ID); assert.Equal(t, "Alice", users[0].Name); assert.Equal(t, "alice@example.com", users[0].Email)
-	assert.Equal(t, 2, users[1].ID); assert.Equal(t, "Bob", users[1].Name); assert.Equal(t, "bob@example.com", users[1].Email)
+	assert.Equal(t, 1, users[0].ID)
+	assert.Equal(t, "Alice", users[0].Name)
+	assert.Equal(t, "alice@example.com", users[0].Email)
+	assert.Equal(t, 2, users[1].ID)
+	assert.Equal(t, "Bob", users[1].Name)
+	assert.Equal(t, "bob@example.com", users[1].Email)
 }
 
 func TestAutoMigrate_TableColumnMismatch_ConflictError(t *testing.T) {
@@ -220,9 +218,8 @@ func TestAutoMigrate_TableUnresolvableConflict_ConflictError(t *testing.T) {
 	require.True(t, errors.As(err, &conflictErr), "Error should be a SchemaConflictError")
 	assert.Equal(t, "data", conflictErr.ObjectName)
 	assert.Equal(t, "TABLE", conflictErr.ObjectType)
-	assert.Contains(t, conflictErr.ConflictDetails, "type mismatch") 
+	assert.Contains(t, conflictErr.ConflictDetails, "type mismatch")
 }
-
 
 func TestAutoMigrate_TableMissingColumn_ConflictError(t *testing.T) {
 	t.Parallel()
@@ -238,7 +235,7 @@ func TestAutoMigrate_TableMissingColumn_ConflictError(t *testing.T) {
 
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	require.Error(t, err, "AutoMigrate should return SchemaConflictError when DB has extra unhandled column")
-	
+
 	var conflictErr *sqlt.SchemaConflictError
 	require.True(t, errors.As(err, &conflictErr), "Error should be a SchemaConflictError")
 	assert.Equal(t, "products", conflictErr.ObjectName)
@@ -252,22 +249,21 @@ func TestAutoMigrate_TableExtraColumnInSchema_ConflictError(t *testing.T) {
 	defer wrappedDB.Close()
 	ctx := gort.Context() // Use gort.Context()
 
-	initialSchema := `CREATE TABLE products (id INTEGER, name TEXT);` 
+	initialSchema := `CREATE TABLE products (id INTEGER, name TEXT);`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
-	
-	targetSchema := `CREATE TABLE products (id INTEGER, name TEXT, description TEXT);` 
-	
+
+	targetSchema := `CREATE TABLE products (id INTEGER, name TEXT, description TEXT);`
+
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	require.Error(t, err, "AutoMigrate should return SchemaConflictError if schema has extra column and compareStatements reports NoMatch")
-	
+
 	var conflictErr *sqlt.SchemaConflictError
 	require.True(t, errors.As(err, &conflictErr), "Error should be a SchemaConflictError")
 	assert.Equal(t, "products", conflictErr.ObjectName)
 	assert.Equal(t, "TABLE", conflictErr.ObjectType)
 	assert.Contains(t, conflictErr.ConflictDetails, "Missing Schema column: 'description'")
 }
-
 
 func TestAutoMigrate_Index_Create(t *testing.T) {
 	t.Parallel()
@@ -280,9 +276,8 @@ func TestAutoMigrate_Index_Create(t *testing.T) {
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE logs (message TEXT);
-CREATE INDEX idx_logs_message ON logs (message);
-`
+		CREATE TABLE logs (message TEXT);
+		CREATE INDEX idx_logs_message ON logs (message);`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 	assert.True(t, objectExists(t, wrappedDB, "index", "idx_logs_message"), "Index 'idx_logs_message' should be created")
@@ -297,13 +292,12 @@ func TestAutoMigrate_Index_Drop(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE logs (message TEXT);
-CREATE INDEX idx_logs_message ON logs (message);
-`
+		CREATE TABLE logs (message TEXT);
+		CREATE INDEX idx_logs_message ON logs (message);`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
-	targetSchema := `CREATE TABLE logs (message TEXT);` 
+	targetSchema := `CREATE TABLE logs (message TEXT);`
 
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
@@ -319,23 +313,21 @@ func TestAutoMigrate_Index_Recreate(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE logs (message TEXT, level TEXT);
-CREATE INDEX idx_logs ON logs (message);
-`
+		CREATE TABLE logs (message TEXT, level TEXT);
+		CREATE INDEX idx_logs ON logs (message);`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE logs (message TEXT, level TEXT);
-CREATE INDEX idx_logs ON logs (level); 
-`
+		CREATE TABLE logs (message TEXT, level TEXT);
+		CREATE INDEX idx_logs ON logs (level);`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 	assert.True(t, objectExists(t, wrappedDB, "index", "idx_logs"), "Index 'idx_logs' should still exist")
-	
+
 	idxSQL := getObjectSQL(t, wrappedDB, "idx_logs")
-	assert.Contains(t, idxSQL, "(\"level\")") 
-	assert.NotContains(t, idxSQL, "(\"message\")") 
+	assert.Contains(t, idxSQL, "(\"level\")")
+	assert.NotContains(t, idxSQL, "(\"message\")")
 
 	err = sqlt.Verify(ctx, wrappedDB, strings.NewReader(targetSchema)) // Use ctx
 	assert.NoError(t, err)
@@ -352,9 +344,8 @@ func TestAutoMigrate_View_Create(t *testing.T) {
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE users (id INTEGER, name TEXT, is_active INTEGER);
-CREATE VIEW active_users AS SELECT name FROM users WHERE is_active = 1;
-`
+		CREATE TABLE users (id INTEGER, name TEXT, is_active INTEGER);
+		CREATE VIEW active_users AS SELECT name FROM users WHERE is_active = 1;`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 	assert.True(t, objectExists(t, wrappedDB, "view", "active_users"))
@@ -369,9 +360,8 @@ func TestAutoMigrate_View_Drop(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE users (id INTEGER, name TEXT, is_active INTEGER);
-CREATE VIEW active_users AS SELECT name FROM users WHERE is_active = 1;
-`
+		CREATE TABLE users (id INTEGER, name TEXT, is_active INTEGER);
+		CREATE VIEW active_users AS SELECT name FROM users WHERE is_active = 1;`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
@@ -390,22 +380,20 @@ func TestAutoMigrate_View_Recreate(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE users (id INTEGER, name TEXT, is_active INTEGER, email TEXT);
-CREATE VIEW user_info AS SELECT name, email FROM users WHERE is_active = 1;
-`
+		CREATE TABLE users (id INTEGER, name TEXT, is_active INTEGER, email TEXT);
+		CREATE VIEW user_info AS SELECT name, email FROM users WHERE is_active = 1;`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE users (id INTEGER, name TEXT, is_active INTEGER, email TEXT);
-CREATE VIEW user_info AS SELECT name, email, id FROM users WHERE is_active = 0; 
-`
+		CREATE TABLE users (id INTEGER, name TEXT, is_active INTEGER, email TEXT);
+		CREATE VIEW user_info AS SELECT name, email, id FROM users WHERE is_active = 0;`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 	assert.True(t, objectExists(t, wrappedDB, "view", "user_info"))
 	viewSQL := getObjectSQL(t, wrappedDB, "user_info")
-	assert.Contains(t, viewSQL, "\"is_active\" = 0") 
-	assert.Contains(t, viewSQL, "\"name\"")      
+	assert.Contains(t, viewSQL, "\"is_active\" = 0")
+	assert.Contains(t, viewSQL, "\"name\"")
 	assert.Contains(t, viewSQL, "\"email\"")
 	assert.Contains(t, viewSQL, "\"id\"")
 	err = sqlt.Verify(ctx, wrappedDB, strings.NewReader(targetSchema)) // Use ctx
@@ -423,9 +411,8 @@ func TestAutoMigrate_Trigger_Create(t *testing.T) {
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE audit_log (entry TEXT);
-CREATE TRIGGER audit_trigger AFTER INSERT ON audit_log BEGIN INSERT INTO audit_log VALUES ('new entry'); END;
-`
+		CREATE TABLE audit_log (entry TEXT);
+		CREATE TRIGGER audit_trigger AFTER INSERT ON audit_log BEGIN INSERT INTO audit_log VALUES ('new entry'); END;`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 	assert.True(t, objectExists(t, wrappedDB, "trigger", "audit_trigger"))
@@ -440,9 +427,8 @@ func TestAutoMigrate_Trigger_Drop(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE audit_log (entry TEXT);
-CREATE TRIGGER audit_trigger AFTER INSERT ON audit_log BEGIN INSERT INTO audit_log VALUES ('new entry'); END;
-`
+		CREATE TABLE audit_log (entry TEXT);
+		CREATE TRIGGER audit_trigger AFTER INSERT ON audit_log BEGIN INSERT INTO audit_log VALUES ('new entry'); END;`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
@@ -461,16 +447,14 @@ func TestAutoMigrate_Trigger_Recreate(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE audit_log (entry TEXT, ts DATETIME);
-CREATE TRIGGER audit_trigger AFTER INSERT ON audit_log BEGIN INSERT INTO audit_log VALUES ('old entry', datetime('now')); END;
-`
+		CREATE TABLE audit_log (entry TEXT, ts DATETIME);
+		CREATE TRIGGER audit_trigger AFTER INSERT ON audit_log BEGIN INSERT INTO audit_log VALUES ('old entry', datetime('now')); END;`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE audit_log (entry TEXT, ts DATETIME);
-CREATE TRIGGER audit_trigger AFTER UPDATE ON audit_log BEGIN INSERT INTO audit_log VALUES ('updated entry', datetime('now')); END;
-`
+		CREATE TABLE audit_log (entry TEXT, ts DATETIME);
+		CREATE TRIGGER audit_trigger AFTER UPDATE ON audit_log BEGIN INSERT INTO audit_log VALUES ('updated entry', datetime('now')); END;`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 	assert.True(t, objectExists(t, wrappedDB, "trigger", "audit_trigger"))
@@ -488,24 +472,22 @@ func TestAutoMigrate_ComplexScenario(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT); 
-CREATE TABLE old_table (data TEXT); 
-CREATE INDEX idx_users_email ON users(email); 
-CREATE VIEW user_emails AS SELECT email FROM users; 
-CREATE TRIGGER user_update_trigger AFTER UPDATE ON users BEGIN SELECT 'updated'; END;
-`
+		CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT); 
+		CREATE TABLE old_table (data TEXT); 
+		CREATE INDEX idx_users_email ON users(email); 
+		CREATE VIEW user_emails AS SELECT email FROM users; 
+		CREATE TRIGGER user_update_trigger AFTER UPDATE ON users BEGIN SELECT 'updated'; END;`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 	_, err = wrappedDB.ExecContext(ctx, "INSERT INTO users (id, name, email) VALUES (1, 'Initial User', 'initial@example.com')") // Use ctx
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE users (email TEXT, name TEXT, id INTEGER PRIMARY KEY); 
-CREATE TABLE new_table (info TEXT); 
-CREATE INDEX idx_users_name ON users(name); 
-CREATE VIEW user_names AS SELECT name FROM users; 
-CREATE TRIGGER user_update_trigger AFTER UPDATE ON users BEGIN SELECT 'updated'; END; 
-`
+		CREATE TABLE users (email TEXT, name TEXT, id INTEGER PRIMARY KEY); 
+		CREATE TABLE new_table (info TEXT); 
+		CREATE INDEX idx_users_name ON users(name); 
+		CREATE VIEW user_names AS SELECT name FROM users; 
+		CREATE TRIGGER user_update_trigger AFTER UPDATE ON users BEGIN SELECT 'updated'; END;`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err, "AutoMigrate complex scenario failed")
 
@@ -518,7 +500,11 @@ CREATE TRIGGER user_update_trigger AFTER UPDATE ON users BEGIN SELECT 'updated';
 	assert.False(t, objectExists(t, wrappedDB, "view", "user_emails"))
 	assert.True(t, objectExists(t, wrappedDB, "trigger", "user_update_trigger"))
 
-	var user struct { Name string; Email string; ID int }
+	var user struct {
+		Name  string
+		Email string
+		ID    int
+	}
 	err = wrappedDB.GetContext(ctx, &user, "SELECT name, email, id FROM users WHERE id = 1") // Use ctx
 	require.NoError(t, err)
 	assert.Equal(t, "Initial User", user.Name)
@@ -539,9 +525,8 @@ func TestAutoMigrate_TableAdded_NoError(t *testing.T) {
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE existing_table (id INTEGER);
-CREATE TABLE new_table (data TEXT); 
-`
+		CREATE TABLE existing_table (id INTEGER);
+		CREATE TABLE new_table (data TEXT);`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 	assert.True(t, objectExists(t, wrappedDB, "table", "new_table"))
@@ -556,14 +541,13 @@ func TestAutoMigrate_TableDropped_NoError(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE table_to_keep (id INTEGER);
-CREATE TABLE table_to_drop (data TEXT);
-`
+		CREATE TABLE table_to_keep (id INTEGER);
+		CREATE TABLE table_to_drop (data TEXT);`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
-	targetSchema := `CREATE TABLE table_to_keep (id INTEGER);` 
-	
+	targetSchema := `CREATE TABLE table_to_keep (id INTEGER);`
+
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 	assert.True(t, objectExists(t, wrappedDB, "table", "table_to_keep"))
@@ -583,9 +567,8 @@ func TestAutoMigrate_SchemaWithOnlyComments(t *testing.T) {
 	require.NoError(t, err)
 
 	targetSchema := `
--- This is a comment.
--- Another comment.
-`
+		-- This is a comment.
+		-- Another comment`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 	assert.False(t, objectExists(t, wrappedDB, "table", "my_table"), "Table 'my_table' should be dropped")
@@ -598,9 +581,8 @@ func TestAutoMigrate_DuplicateObjectNameInSchema_Error(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	targetSchema := `
-CREATE TABLE duplicate_table (id INTEGER);
-CREATE TABLE duplicate_table (name TEXT); 
-`
+		CREATE TABLE duplicate_table (id INTEGER);
+		CREATE TABLE duplicate_table (name TEXT);`
 	err := sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate object name 'duplicate_table' found in schema definition")
@@ -619,16 +601,18 @@ func TestAutoMigrate_QuotedIdentifiers(t *testing.T) {
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE "order" (quantity INTEGER, "item-name" TEXT);
-CREATE INDEX "idx_order_item-name" ON "order" ("item-name");
-`
+		CREATE TABLE "order" (quantity INTEGER, "item-name" TEXT);
+		CREATE INDEX "idx_order_item-name" ON "order" ("item-name");`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err, "AutoMigrate with quoted identifiers failed")
 
 	err = sqlt.Verify(ctx, wrappedDB, strings.NewReader(targetSchema)) // Use ctx
 	assert.NoError(t, err, "Verify failed for schema with quoted identifiers")
 
-	var item struct { ItemName string `db:"item-name"`; Quantity int `db:"quantity"` }
+	var item struct {
+		ItemName string `db:"item-name"`
+		Quantity int    `db:"quantity"`
+	}
 	err = wrappedDB.GetContext(ctx, &item, `SELECT "item-name", quantity FROM "order" WHERE quantity = 5`) // Use ctx
 	require.NoError(t, err)
 	assert.Equal(t, "test item", item.ItemName)
@@ -647,17 +631,17 @@ func TestAutoMigrate_TableConflict_DBExtraColumnAndSchemaDiff(t *testing.T) {
 	initialSchema := `CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, version INTEGER, unused_db_column TEXT);`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
-	
-	targetSchema := `CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, version TEXT);` 
+
+	targetSchema := `CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, version TEXT);`
 
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	require.Error(t, err, "AutoMigrate should return SchemaConflictError")
-	
+
 	var conflictErr *sqlt.SchemaConflictError
 	require.True(t, errors.As(err, &conflictErr), "Error should be a SchemaConflictError")
 	assert.Equal(t, "products", conflictErr.ObjectName)
 	assert.Equal(t, "TABLE", conflictErr.ObjectType)
-	assert.Contains(t, conflictErr.ConflictDetails, "type mismatch") 
+	assert.Contains(t, conflictErr.ConflictDetails, "type mismatch")
 	assert.Contains(t, conflictErr.ConflictDetails, "Extra DB column: 'unused_db_column'")
 }
 
@@ -668,22 +652,20 @@ func TestAutoMigrate_TableNameConflictsWithExistingIndexName(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE some_table (data TEXT);
-CREATE INDEX my_object ON some_table (data);
-`
+		CREATE TABLE some_table (data TEXT);
+		CREATE INDEX my_object ON some_table (data);`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE some_table (data TEXT); 
-CREATE TABLE my_object (id INTEGER); 
-`
+		CREATE TABLE some_table (data TEXT); 
+		CREATE TABLE my_object (id INTEGER);`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 
 	assert.True(t, objectExists(t, wrappedDB, "table", "my_object"))
 	assert.False(t, objectExists(t, wrappedDB, "index", "my_object"))
-	
+
 	err = sqlt.Verify(ctx, wrappedDB, strings.NewReader(targetSchema)) // Use ctx
 	assert.NoError(t, err)
 }
@@ -699,9 +681,8 @@ func TestAutoMigrate_IndexNameConflictsWithExistingTableName(t *testing.T) {
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE my_other_table (data TEXT);
-CREATE INDEX my_object ON my_other_table (data);
-`
+		CREATE TABLE my_other_table (data TEXT);
+		CREATE INDEX my_object ON my_other_table (data);`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 
@@ -718,21 +699,20 @@ func TestAutoMigrate_CreateTableWithForeignKey(t *testing.T) {
 	defer wrappedDB.Close()
 	ctx := gort.Context() // Use gort.Context()
 
-    targetSchema := `
-CREATE TABLE parent (id INTEGER PRIMARY KEY);
-CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER, FOREIGN KEY (parent_id) REFERENCES parent(id));
-`
-    err := sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
-    assert.NoError(t, err)
+	targetSchema := `
+		CREATE TABLE parent (id INTEGER PRIMARY KEY);
+		CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER, FOREIGN KEY (parent_id) REFERENCES parent(id));`
+	err := sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
+	assert.NoError(t, err)
 
-    assert.True(t, objectExists(t, wrappedDB, "table", "parent"))
-    assert.True(t, objectExists(t, wrappedDB, "table", "child"))
+	assert.True(t, objectExists(t, wrappedDB, "table", "parent"))
+	assert.True(t, objectExists(t, wrappedDB, "table", "child"))
 
-    err = sqlt.Verify(ctx, wrappedDB, strings.NewReader(targetSchema)) // Use ctx
-    assert.NoError(t, err)
+	err = sqlt.Verify(ctx, wrappedDB, strings.NewReader(targetSchema)) // Use ctx
+	assert.NoError(t, err)
 
-    _, err = wrappedDB.ExecContext(ctx, "INSERT INTO child (id, parent_id) VALUES (1, 100);")  // Use ctx
-    assert.Error(t, err) 
+	_, err = wrappedDB.ExecContext(ctx, "INSERT INTO child (id, parent_id) VALUES (1, 100);") // Use ctx
+	assert.Error(t, err)
 }
 
 func TestAutoMigrate_TableReorderWithForeignKey(t *testing.T) {
@@ -742,8 +722,8 @@ func TestAutoMigrate_TableReorderWithForeignKey(t *testing.T) {
 	ctx := gort.Context() // Use gort.Context()
 
 	initialSchema := `
-CREATE TABLE parent (id INTEGER PRIMARY KEY);
-CREATE TABLE child (id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER, FOREIGN KEY (parent_id) REFERENCES parent(id));`
+		CREATE TABLE parent (id INTEGER PRIMARY KEY);
+		CREATE TABLE child (id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER, FOREIGN KEY (parent_id) REFERENCES parent(id));`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
 	require.NoError(t, err)
 
@@ -753,22 +733,27 @@ CREATE TABLE child (id INTEGER PRIMARY KEY, name TEXT, parent_id INTEGER, FOREIG
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE parent (id INTEGER PRIMARY KEY);
-CREATE TABLE child (parent_id INTEGER, name TEXT, id INTEGER PRIMARY KEY, FOREIGN KEY (parent_id) REFERENCES parent(id));`
-
+		CREATE TABLE parent (id INTEGER PRIMARY KEY);
+		CREATE TABLE child (parent_id INTEGER, name TEXT, id INTEGER PRIMARY KEY, FOREIGN KEY (parent_id) REFERENCES parent(id));`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
 	assert.NoError(t, err)
 
 	err = sqlt.Verify(ctx, wrappedDB, strings.NewReader(targetSchema)) // Use ctx
 	assert.NoError(t, err, "Verify should pass after reordering table with FK")
 
-	var c struct { ID int `db:"id"`; Name string `db:"name"`; ParentID int `db:"parent_id"`	}
+	var c struct {
+		ID       int    `db:"id"`
+		Name     string `db:"name"`
+		ParentID int    `db:"parent_id"`
+	}
 	err = wrappedDB.GetContext(ctx, &c, "SELECT id, name, parent_id FROM child WHERE id = 1") // Use ctx
 	require.NoError(t, err)
-	assert.Equal(t, 1, c.ID); assert.Equal(t, "Child A", c.Name); assert.Equal(t, 10, c.ParentID)
+	assert.Equal(t, 1, c.ID)
+	assert.Equal(t, "Child A", c.Name)
+	assert.Equal(t, 10, c.ParentID)
 
-    _, err = wrappedDB.ExecContext(ctx, "INSERT INTO child (id, name, parent_id) VALUES (2, 'Child B', 999);")  // Use ctx
-    assert.Error(t, err)
+	_, err = wrappedDB.ExecContext(ctx, "INSERT INTO child (id, name, parent_id) VALUES (2, 'Child B', 999);") // Use ctx
+	assert.Error(t, err)
 }
 
 func TestAutoMigrate_TableConstraintChanged_ConflictError(t *testing.T) {
@@ -777,20 +762,20 @@ func TestAutoMigrate_TableConstraintChanged_ConflictError(t *testing.T) {
 	defer wrappedDB.Close()
 	ctx := gort.Context() // Use gort.Context()
 
-    initialSchema := `CREATE TABLE data (id INTEGER, val TEXT);`
-    _, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
-    require.NoError(t, err)
+	initialSchema := `CREATE TABLE data (id INTEGER, val TEXT);`
+	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
+	require.NoError(t, err)
 
-    targetSchema := `CREATE TABLE data (id INTEGER, val TEXT NOT NULL);` 
+	targetSchema := `CREATE TABLE data (id INTEGER, val TEXT NOT NULL);`
 
-    err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
-    require.Error(t, err, "AutoMigrate should return SchemaConflictError for constraint change")
+	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
+	require.Error(t, err, "AutoMigrate should return SchemaConflictError for constraint change")
 
-    var conflictErr *sqlt.SchemaConflictError
-    require.True(t, errors.As(err, &conflictErr), "Error should be a SchemaConflictError")
-    assert.Equal(t, "data", conflictErr.ObjectName)
-    assert.Equal(t, "TABLE", conflictErr.ObjectType)
-    assert.Contains(t, conflictErr.ConflictDetails, "constraint") 
+	var conflictErr *sqlt.SchemaConflictError
+	require.True(t, errors.As(err, &conflictErr), "Error should be a SchemaConflictError")
+	assert.Equal(t, "data", conflictErr.ObjectName)
+	assert.Equal(t, "TABLE", conflictErr.ObjectType)
+	assert.Contains(t, conflictErr.ConflictDetails, "constraint")
 }
 
 func TestAutoMigrate_TablePrimaryKeyChanged_ConflictError(t *testing.T) {
@@ -799,20 +784,20 @@ func TestAutoMigrate_TablePrimaryKeyChanged_ConflictError(t *testing.T) {
 	defer wrappedDB.Close()
 	ctx := gort.Context() // Use gort.Context()
 
-    initialSchema := `CREATE TABLE data (id INTEGER PRIMARY KEY, val TEXT);`
-    _, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
-    require.NoError(t, err)
+	initialSchema := `CREATE TABLE data (id INTEGER PRIMARY KEY, val TEXT);`
+	_, err := wrappedDB.ExecContext(ctx, initialSchema) // Use ctx
+	require.NoError(t, err)
 
-    targetSchema := `CREATE TABLE data (id INTEGER, val TEXT PRIMARY KEY);` 
+	targetSchema := `CREATE TABLE data (id INTEGER, val TEXT PRIMARY KEY);`
 
-    err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
-    require.Error(t, err, "AutoMigrate should return SchemaConflictError for PK change")
+	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), true) // Use ctx, allowTableDeletes=true
+	require.Error(t, err, "AutoMigrate should return SchemaConflictError for PK change")
 
-    var conflictErr *sqlt.SchemaConflictError
-    require.True(t, errors.As(err, &conflictErr), "Error should be a SchemaConflictError")
-    assert.Equal(t, "data", conflictErr.ObjectName)
-    assert.Equal(t, "TABLE", conflictErr.ObjectType)
-    assert.Contains(t, conflictErr.ConflictDetails, "constraint") 
+	var conflictErr *sqlt.SchemaConflictError
+	require.True(t, errors.As(err, &conflictErr), "Error should be a SchemaConflictError")
+	assert.Equal(t, "data", conflictErr.ObjectName)
+	assert.Equal(t, "TABLE", conflictErr.ObjectType)
+	assert.Contains(t, conflictErr.ConflictDetails, "constraint")
 }
 
 // TestDisallowTableDeletes_NoErrorWhenNoTablesDropped tests that AutoMigrate proceeds normally
@@ -829,9 +814,8 @@ func TestDisallowTableDeletes_NoErrorWhenNoTablesDropped(t *testing.T) {
 
 	// Target schema adds a table, does not drop 'users'
 	targetSchema := `
-CREATE TABLE users (id INTEGER);
-CREATE TABLE items (name TEXT);
-`
+		CREATE TABLE users (id INTEGER);
+		CREATE TABLE items (name TEXT);`
 	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false) // allowTableDeletes = false
 	assert.NoError(t, err, "AutoMigrate should not error if no tables were to be dropped")
 	assert.True(t, objectExists(t, wrappedDB, "table", "users"))
@@ -847,11 +831,10 @@ func TestDisallowTableDeletes_ErrorWhenTablesWouldBeDropped(t *testing.T) {
 	ctx := gort.Context()
 
 	initialSchema := `
-CREATE TABLE users (id INTEGER);
-CREATE TABLE items_to_drop (name TEXT);
-CREATE TABLE orders_to_drop (order_id INTEGER);
-CREATE INDEX idx_items ON items_to_drop(name); 
-`
+		CREATE TABLE users (id INTEGER);
+		CREATE TABLE items_to_drop (name TEXT);
+		CREATE TABLE orders_to_drop (order_id INTEGER);
+		CREATE INDEX idx_items ON items_to_drop(name);`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema)
 	require.NoError(t, err)
 
@@ -863,7 +846,7 @@ CREATE INDEX idx_items ON items_to_drop(name);
 	var tableDeletionErr sqlt.ErrTableDeletionNotAllowed
 	isCorrectErrorType := errors.As(err, &tableDeletionErr)
 	require.True(t, isCorrectErrorType, "Error should be of type ErrTableDeletionNotAllowed")
-	
+
 	expectedTables := []string{"items_to_drop", "orders_to_drop"}
 	actualTables := tableDeletionErr.Tables
 	assert.ElementsMatch(t, expectedTables, actualTables, "List of tables to be deleted is not as expected")
@@ -883,9 +866,8 @@ func TestAllowTableDeletes_SuccessWhenTablesAreDropped(t *testing.T) {
 	ctx := gort.Context()
 
 	initialSchema := `
-CREATE TABLE users (id INTEGER);
-CREATE TABLE items_to_drop (name TEXT);
-`
+		CREATE TABLE users (id INTEGER);
+		CREATE TABLE items_to_drop (name TEXT);`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema)
 	require.NoError(t, err)
 
@@ -907,15 +889,14 @@ func TestDisallowTableDeletes_ViewDropAllowed(t *testing.T) {
 	ctx := gort.Context()
 
 	initialSchema := `
-CREATE TABLE users (id INTEGER);
-CREATE VIEW user_view AS SELECT id FROM users;
-`
+		CREATE TABLE users (id INTEGER);
+		CREATE VIEW user_view AS SELECT id FROM users;`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema)
 	require.NoError(t, err)
 
-	targetSchema := `CREATE TABLE users (id INTEGER);` 
+	targetSchema := `CREATE TABLE users (id INTEGER);`
 
-	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false) 
+	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false)
 	assert.NoError(t, err, "AutoMigrate should allow non-table drops even if table drops are disallowed")
 	assert.True(t, objectExists(t, wrappedDB, "table", "users"))
 	assert.False(t, objectExists(t, wrappedDB, "view", "user_view"), "View 'user_view' should have been dropped")
@@ -930,15 +911,14 @@ func TestDisallowTableDeletes_IndexDropAllowed(t *testing.T) {
 	ctx := gort.Context()
 
 	initialSchema := `
-CREATE TABLE users (id INTEGER);
-CREATE INDEX idx_user_id ON users(id);
-`
+		CREATE TABLE users (id INTEGER);
+		CREATE INDEX idx_user_id ON users(id);`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema)
 	require.NoError(t, err)
 
-	targetSchema := `CREATE TABLE users (id INTEGER);` 
+	targetSchema := `CREATE TABLE users (id INTEGER);`
 
-	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false) 
+	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false)
 	assert.NoError(t, err, "AutoMigrate should allow non-table drops even if table drops are disallowed")
 	assert.True(t, objectExists(t, wrappedDB, "table", "users"))
 	assert.False(t, objectExists(t, wrappedDB, "index", "idx_user_id"), "Index 'idx_user_id' should have been dropped")
@@ -953,15 +933,14 @@ func TestDisallowTableDeletes_TriggerDropAllowed(t *testing.T) {
 	ctx := gort.Context()
 
 	initialSchema := `
-CREATE TABLE users (id INTEGER);
-CREATE TRIGGER user_trigger AFTER INSERT ON users BEGIN SELECT 1; END;
-`
+		CREATE TABLE users (id INTEGER);
+		CREATE TRIGGER user_trigger AFTER INSERT ON users BEGIN SELECT 1; END;`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema)
 	require.NoError(t, err)
 
-	targetSchema := `CREATE TABLE users (id INTEGER);` 
+	targetSchema := `CREATE TABLE users (id INTEGER);`
 
-	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false) 
+	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false)
 	assert.NoError(t, err, "AutoMigrate should allow non-table drops even if table drops are disallowed")
 	assert.True(t, objectExists(t, wrappedDB, "table", "users"))
 	assert.False(t, objectExists(t, wrappedDB, "trigger", "user_trigger"), "Trigger 'user_trigger' should have been dropped")
@@ -982,9 +961,9 @@ func TestDisallowTableDeletes_TableRecreationConflictError(t *testing.T) {
 
 	targetSchema := `CREATE TABLE users (id INTEGER, name INTEGER);` // Type change
 
-	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false) 
+	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false)
 	require.Error(t, err)
-	
+
 	var conflictErr *sqlt.SchemaConflictError
 	isConflictError := errors.As(err, &conflictErr)
 	assert.True(t, isConflictError, "Expected a SchemaConflictError due to type change, not ErrTableDeletionNotAllowed")
@@ -1011,9 +990,9 @@ func TestDisallowTableDeletes_TableReorderAllowed(t *testing.T) {
 
 	targetSchema := `CREATE TABLE users (name TEXT, id INTEGER, email TEXT);` // Reorder
 
-	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false) 
+	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false)
 	assert.NoError(t, err, "Table reordering should be allowed even if table deletes are disallowed")
-	
+
 	err = sqlt.Verify(ctx, wrappedDB, strings.NewReader(targetSchema))
 	assert.NoError(t, err)
 }
@@ -1029,17 +1008,15 @@ func TestDisallowTableDeletes_TableReplacedByIndex_ConflictError(t *testing.T) {
 	ctx := gort.Context()
 
 	initialSchema := `
-CREATE TABLE my_object (id INTEGER);
-CREATE TABLE another_table (data TEXT);
-`
+		CREATE TABLE my_object (id INTEGER);
+		CREATE TABLE another_table (data TEXT);`
 	_, err := wrappedDB.ExecContext(ctx, initialSchema)
 	require.NoError(t, err)
 
 	targetSchema := `
-CREATE TABLE another_table (data TEXT);
-CREATE INDEX my_object ON another_table(data);
-`
-	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false) 
+		CREATE TABLE another_table (data TEXT);
+		CREATE INDEX my_object ON another_table(data);`
+	err = sqlt.AutoMigrate(ctx, wrappedDB, strings.NewReader(targetSchema), false)
 	require.Error(t, err)
 
 	var tableDeletionErr sqlt.ErrTableDeletionNotAllowed
@@ -1048,10 +1025,6 @@ CREATE INDEX my_object ON another_table(data);
 	if isDeletionError {
 		assert.Contains(t, tableDeletionErr.Tables, "my_object")
 	}
-	assert.True(t, objectExists(t, wrappedDB, "table", "my_object")) 
-	assert.False(t, objectExists(t, wrappedDB, "index", "my_object")) 
+	assert.True(t, objectExists(t, wrappedDB, "table", "my_object"))
+	assert.False(t, objectExists(t, wrappedDB, "index", "my_object"))
 }
-//[end of automigrate_test.go]
-// Removed the duplicated [end of automigrate_test.go] marker
-// and the extraneous '[' character if it was present.
-// Assuming the file ends cleanly after the last curly brace of the last test function.
