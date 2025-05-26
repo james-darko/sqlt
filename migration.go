@@ -38,6 +38,89 @@ func PrintTables(ctx context.Context, db DB) error {
 	return nil
 }
 
+// AutoMigrate orchestrates the schema migration process.
+// It analyzes the desired schema, provided via schemaReader, and compares it
+// against the current schema of the database (db).
+//
+// AutoMigrate performs the following operations:
+// 1. Fetches the current schema from the database.
+// 2. Parses the desired schema from the schemaReader.
+// 3. Identifies differences between the desired and current schemas.
+// 4. If there are structural mismatches in tables that cannot be automatically
+//    resolved (e.g., column type changes, conflicting constraints), it returns
+//    an *ErrSchemaConflicts error containing details of each conflict.
+//    In such cases, no changes are made to the database.
+// 5. If there are no unresolvable conflicts, it proceeds to apply changes
+//    within a single database transaction. This includes:
+//    a. Deleting extraneous schema elements (triggers, views, indexes, then tables)
+//       that exist in the current schema but not in the desired one.
+//    b. Creating new schema elements (tables, then indexes, views, then triggers)
+//       that exist in the desired schema but not in the current one.
+//    c. Recreating elements (indexes, views, triggers) whose definitions have changed.
+//       Tables with changed structures are not automatically recreated by this function;
+//       such changes will result in an *ErrSchemaConflicts error.
+//
+// Parameters:
+//   - ctx: The context for database operations.
+//   - db: The database connection (implementing the DB interface) to migrate.
+//   - schemaReader: An io.Reader providing the SQL statements for the desired schema.
+//
+// Returns:
+//   - nil: If the migration is successful and the database schema aligns with the desired schema.
+//   - *ErrSchemaConflicts: If unresolvable table structure mismatches are detected.
+//     This error type wraps a slice of SchemaConflictError, each detailing a specific conflict.
+//   - error: For other issues, such as I/O errors during schema parsing, database
+//     connection problems, or errors during the execution of DDL statements.
+//
+// Note: The order of operations (deletions before creations, and specific order
+// for element types) is crucial to handle dependencies correctly. All DDL changes
+// are performed within a single transaction to ensure atomicity.
+func AutoMigrate(ctx context.Context, db DB, schemaReader io.Reader) error {
+	// 1. Fetch Current DB Schema
+	currentSchema, err := FetchDBSchema(ctx, db)
+	if err != nil {
+		return fmt.Errorf("failed to fetch current DB schema: %w", err)
+	}
+
+	// 2. Parse Desired Schema
+	desiredSchema, err := ParseSchemaReader(schemaReader)
+	if err != nil {
+		return fmt.Errorf("failed to parse desired schema: %w", err)
+	}
+
+	// 3. Identify Initial Differences
+	diffs := IdentifySchemaDifferences(desiredSchema, currentSchema)
+
+	// 4. Process Differences and Perform Detailed Comparisons
+	tableConflicts := ProcessSchemaDifferences(diffs, desiredSchema, currentSchema)
+	if len(tableConflicts) > 0 {
+		return &ErrSchemaConflicts{Conflicts: tableConflicts}
+	}
+
+	// 5. Execute Deletions and Creations in a Transaction
+	err = db.Txc(ctx, func(tx Tx) error {
+		// Execute Deletions
+		if err := ExecuteDeletions(tx, &diffs.ToDelete); err != nil {
+			return fmt.Errorf("failed during schema deletions: %w", err)
+		}
+
+		// Execute Creations
+		if err := ExecuteCreations(tx, &diffs.ToCreate); err != nil {
+			return fmt.Errorf("failed during schema creations: %w", err)
+		}
+
+		return nil // Commit transaction
+	})
+
+	if err != nil {
+		// Transaction failed (either due to deletions, creations, or other tx issues)
+		return fmt.Errorf("schema migration transaction failed: %w", err)
+	}
+
+	// 6. Return Value
+	return nil // All operations completed successfully
+}
+
 func masterRows(ctx context.Context, db DB) ([]masterRow, error) {
 	var rows []masterRow
 	err := db.SelectContext(ctx, &rows, "SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
@@ -130,14 +213,30 @@ func Verify(ctx context.Context, db DB, schema io.Reader) error {
 	return nil
 }
 
-// Donotes the version table is empty or non-existent.
+// ErrNoVersion indicates that the version table in the database is empty or non-existent.
+// This error is typically used by traditional version-based migration systems.
 var ErrNoVersion = errors.New("no version found in database")
 
-// Applies the function in the versions map until a func is not found in the current version.
-// The version number denotes the version the function migrates from.
+// Migrate applies versioned migration functions to the database.
+// It reads the current schema version from a 'version' table in the database.
+// Then, it iteratively applies migration functions from the 'versions' map,
+// starting from the current version + 1, until a function for a version is not found.
+// Each successful migration function should update the version in the 'version' table.
 //
-// Expects a table named `version` with a `version` column with current version number.
-// Returns ErrNoVersion if the version table is not found or empty.
+// This is a more traditional, imperative migration approach, contrasted with AutoMigrate's
+// declarative, schema-driven approach.
+//
+// Parameters:
+//  - ctx: The context for database operations.
+//  - db: The database connection (implementing the DB interface).
+//  - versions: A map where keys are schema version numbers and values are migration
+//    functions. A function `versions[N]` is expected to migrate the schema
+//    from version N to version N+1.
+//
+// Returns:
+//  - nil: If all applicable migrations are successful or if no migrations are needed.
+//  - ErrNoVersion: If the 'version' table is not found or is empty.
+//  - error: For any other database errors or errors during migration function execution.
 func Migrate(ctx context.Context, db DB, versions map[int]func(context.Context, DB) error) error {
 	lastVersion := -1
 	for {
@@ -178,28 +277,46 @@ type tableInfo struct {
 	Sql  string `db:"sql"`
 }
 
-// MigrationMap is a map of verion numbers to their respective migration functions.
+// MigrationMap defines a map of version numbers to their respective migration functions.
+// It's used by the Migrate function to apply versioned schema changes.
 type MigrationMap map[int]func(context.Context, DB) error
 
-// MigrationFunc is a function that migrates the database from one version to another.
+// MigrationFunc represents a function that migrates the database schema from one
+// version to the next. It takes a context and a database connection.
 type MigrationFunc func(context.Context, DB) error
 
-// Helper wrapper function for migration. Should be used unless you have good reason not to.
+// MigrateFunc is a helper function to create a MigrationFunc for the Migrate system.
+// It facilitates the common SQLite pattern for altering tables (rename, create new, copy data, drop old, rename new)
+// and handles foreign key constraints and index/trigger recreation.
 //
-// db: db handle.
+// Parameters:
+//  - db: The database connection (unused in the returned function's signature matching but captured by closure if needed, though typically the one from MigrationFunc is used).
+//  - version: The schema version number this function migrates *from*. The 'version' table
+//    in the database will be automatically incremented after this function runs successfully.
+//  - migrateTables: A slice of table names that will be migrated using the "rename and recreate" strategy.
+//    The provided `fn` is expected to create new tables named `new_<tableName>` with the desired structure
+//    and populate them. This helper will then handle dropping the old tables, renaming the new ones,
+//    and attempting to recreate associated indexes and other objects. Refer to SQLite documentation
+//    on "Making Other Kinds Of Table Schema Changes" (section 7 of lang_altertable.html).
+//  - fn: The core migration logic. It receives a transaction `Tx` and a `restore` function.
+//    The `restore` function, when called, executes the steps to finalize the table migrations
+//    (drop old, rename new, recreate indexes/triggers). It's typically called after `fn` has
+//    created and populated the `new_<tableName>` tables. If `fn` does not call `restore`,
+//    it will be called automatically after `fn` returns without error.
 //
-// version: The version number the function migrates from. The version will be automatically incremented after the function runs successfully.
+// Returns:
+//   A MigrationFunc suitable for use with the Migrate function.
 //
-// migrateTables: Nilable slice of tables that will be migrated.
-// see section 7: https://www.sqlite.org/lang_altertable.html
-// Contains tables that will follow the above pattern to migrate. The fn is expected to create tables named `new_<tableName>`
-// with the new structure. MigrateFunc will take care of all the steps outside of definining and populating the `new_<tableName>`'s.
-// The restore function passed to fn will handle the steps required after the new tables are set up.
-// If the fn does not call restore, it will be called after fn returns.
-// Indexes are re-created automically for migrated tables.
-// The section 7 steps are always followed even when migrateTables is empty. Restore will be a no-op in that case.
-//
-// fn: migration function
+// The overall process within the returned MigrationFunc is:
+// 1. `PRAGMA foreign_keys=OFF` is executed.
+// 2. A transaction is started.
+// 3. The user-provided `fn` is executed.
+// 4. The `restore` logic (table swaps, index recreation) is executed (if not already by `fn`).
+// 5. `PRAGMA foreign_key_check` is run to ensure integrity.
+// 6. The schema version in the `version` table is incremented.
+// 7. The transaction is committed.
+// 8. `PRAGMA foreign_keys=ON` is executed.
+// Errors at any critical step lead to a rollback and error propagation.
 func MigrateFunc(db DB, version int, migrateTables []string, fn func(tx Tx, restore func() error) error) MigrationFunc {
 	return func(ctx context.Context, db DB) error {
 		_, err := db.Exec("PRAGMA foreign_keys=OFF")
@@ -335,28 +452,40 @@ func MigrateFunc(db DB, version int, migrateTables []string, fn func(tx Tx, rest
 	}
 }
 
-// ExecString executes the SQL from the provided string in a transaction.
-// Supports multiple statements separated by semicolons.
+// ExecString executes one or more SQL statements from the provided string.
+// The statements are executed within a single transaction.
+// Statements should be separated by semicolons.
+// It handles multi-line statements and comments (lines starting with "--").
+// Special handling is included for `CREATE TRIGGER` statements to ensure the entire
+// trigger block is captured correctly.
 func ExecString(ctx context.Context, db DB, sql string) error {
 	return Exec(ctx, db, strings.NewReader(sql))
 }
 
-// ExecTxString executes the SQL from the provided string in a transaction.
-// Supports multiple statements separated by semicolons.
+// ExecTxString executes one or more SQL statements from the provided string within an existing transaction `tx`.
+// Statements should be separated by semicolons.
+// It handles multi-line statements and comments (lines starting with "--").
+// Special handling for `CREATE TRIGGER` statements is included.
 func ExecTxString(tx Tx, sql string) error {
 	return ExecTx(tx, strings.NewReader(sql))
 }
 
-// Exec executes the SQL from the provided reader in a transaction.
-// Supports multiple statements separated by semicolons.
+// Exec executes one or more SQL statements from the provided io.Reader.
+// The statements are executed within a single transaction.
+// Statements should be separated by semicolons.
+// It handles multi-line statements and comments (lines starting with "--").
+// Special handling for `CREATE TRIGGER` statements is included.
 func Exec(ctx context.Context, db DB, reader io.Reader) error {
 	return db.Txc(ctx, func(tx Tx) error {
 		return ExecTx(tx, reader)
 	})
 }
 
-// ExecTx executes the SQL from the provided reader in a transaction.
-// Supports multiple statements separated by semicolons.
+// ExecTx executes one or more SQL statements from the provided io.Reader within an existing transaction `tx`.
+// Statements should be separated by semicolons.
+// It handles multi-line statements and comments (lines starting with "--").
+// Special handling for `CREATE TRIGGER` statements ensures that multi-line trigger
+// definitions ending with "END;" are processed as a single statement.
 func ExecTx(tx Tx, reader io.Reader) error {
 	var buf []byte
 	scanner := bufio.NewReader(reader)
