@@ -21,6 +21,8 @@ type Tx interface {
 	MustGet(dest any, query string, args ...any)
 	Select(dest any, query string, args ...any) error
 	MustSelect(dest any, query string, args ...any)
+	GetContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error      // Added
+	SelectContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error // Added
 	SelectIn(dest any, query string, args ...any) error
 	MustSelectIn(dest any, query string, args ...any)
 	NamedExec(query string, arg any) (Result, error)

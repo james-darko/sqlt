@@ -44,6 +44,12 @@ type DB interface {
 	TxcImm(ctx context.Context, fn func(tx Tx) error) error
 }
 
+// DBReader is an interface for reading from the database, implemented by DB and Tx.
+type DBReader interface {
+	GetContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error
+	SelectContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error
+}
+
 type sqlxDB struct {
 	db *sqlx.DB
 }

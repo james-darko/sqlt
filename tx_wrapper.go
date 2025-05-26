@@ -1,6 +1,8 @@
 package sqlt
 
 import (
+	"context" // Added import for context
+
 	"github.com/jmoiron/sqlx"
 )
 
@@ -14,6 +16,14 @@ func (tx *txWrapper) Exec(query string, args ...any) (Result, error) {
 		return nil, err
 	}
 	return sqltResult{r}, nil
+}
+
+func (tx *txWrapper) GetContext(ctx context.Context, dest any, query string, args ...any) error {
+	return tx.tx.GetContext(ctx, dest, query, args...)
+}
+
+func (tx *txWrapper) SelectContext(ctx context.Context, dest any, query string, args ...any) error {
+	return tx.tx.SelectContext(ctx, dest, query, args...)
 }
 
 func (tx *txWrapper) MustExec(query string, args ...any) Result {

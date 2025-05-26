@@ -8,13 +8,28 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
+	// "regexp" // Removed regexp import
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/james-darko/gort"
 	rsql "github.com/rqlite/sql"
+)
+
+// quoteIdent wraps an identifier in double quotes for SQLite.
+// This is a simple version; proper SQL quoting can be more complex
+// and should ideally handle existing quotes or special characters within the identifier.
+func quoteIdent(ident string) string {
+	// Replace existing double quotes with two double quotes (SQLite's way of escaping them)
+	escapedIdent := strings.ReplaceAll(ident, "\"", "\"\"")
+	return fmt.Sprintf("\"%s\"", escapedIdent)
+}
+
+const (
+	statementMatchExact       = iota
+	statementMatchReorderNeeded // only for tables
+	statementMatchNoMatch
 )
 
 // PrintTables prints the names and SQL of all tables in the database.
@@ -38,7 +53,150 @@ func PrintTables(ctx context.Context, db DB) error {
 	return nil
 }
 
-func masterRows(ctx context.Context, db DB) ([]masterRow, error) {
+// compareStatements compares two SQL statements and returns the match type and a description of the differences.
+func compareStatements(dbStmt, schemaStmt rsql.Statement) (matchType int, diffDescription string, err error) {
+	// Initial Check:
+	if dbStmt == nil && schemaStmt != nil {
+		return statementMatchNoMatch, "Database object is nil, schema object is not (new object)", nil
+	}
+	if dbStmt != nil && schemaStmt == nil {
+		return statementMatchNoMatch, "Schema object is nil, database object is not (object to be dropped)", nil
+	}
+	if dbStmt == nil && schemaStmt == nil {
+		return statementMatchExact, "", nil // Both nil, considered exact match.
+	}
+
+	dbSQL := dbStmt.String()
+	schemaSQL := schemaStmt.String()
+
+	if dbSQL == schemaSQL {
+		return statementMatchExact, "", nil
+	}
+
+	// Type Check & Deep Comparison for Tables:
+	dbTableStmt, dbIsTable := dbStmt.(*rsql.CreateTableStatement)
+	schemaTableStmt, schemaIsTable := schemaStmt.(*rsql.CreateTableStatement)
+
+	if dbIsTable && schemaIsTable {
+		match, desc := compareTableStatements(dbTableStmt, schemaTableStmt)
+		return match, desc, nil
+	} else if dbIsTable != schemaIsTable {
+		return statementMatchNoMatch, "Object type mismatch (e.g., DB is a table, Schema is an index/view for the same name)", nil
+	}
+
+	// String Comparison for Other Types (Indexes, Views, Triggers):
+	return statementMatchNoMatch, fmt.Sprintf("Definition mismatch. DB: %s, Schema: %s", dbSQL, schemaSQL), nil
+}
+
+func normalizeTypeName(typeName string) string {
+	upper := strings.ToUpper(typeName)
+	if upper == "INT" {
+		return "INTEGER"
+	}
+	return upper
+}
+
+func compareConstraints(dbCons, schemaCons []rsql.Constraint) (bool, string) {
+	if len(dbCons) != len(schemaCons) {
+		return false, fmt.Sprintf("constraint count mismatch (DB: %d, Schema: %d)", len(dbCons), len(schemaCons))
+	}
+	dbConsStr := make(map[string]int)
+	schemaConsStr := make(map[string]int)
+	for _, c := range dbCons {
+		dbConsStr[c.String()]++
+	}
+	for _, c := range schemaCons {
+		schemaConsStr[c.String()]++
+	}
+	for s, count := range dbConsStr {
+		if schemaConsStr[s] != count {
+			return false, fmt.Sprintf("mismatched constraint: %s (DB count: %d, Schema count: %d)", s, count, schemaConsStr[s])
+		}
+	}
+	for s, count := range schemaConsStr {
+		if dbConsStr[s] != count {
+			return false, fmt.Sprintf("mismatched constraint: %s (Schema count: %d, DB count: %d)", s, count, dbConsStr[s])
+		}
+	}
+	return true, ""
+}
+
+func compareTableStatements(dbStmt, schemaStmt *rsql.CreateTableStatement) (int, string) {
+	var diffs []string
+	dbCols := make(map[string]*rsql.ColumnDefinition)
+	for _, col := range dbStmt.Columns {
+		dbCols[col.Name.Name] = col
+	}
+	schemaCols := make(map[string]*rsql.ColumnDefinition)
+	for _, col := range schemaStmt.Columns {
+		schemaCols[col.Name.Name] = col
+	}
+
+	for name, dbCol := range dbCols {
+		schemaCol, ok := schemaCols[name]
+		if !ok {
+			diffs = append(diffs, fmt.Sprintf("Extra DB column: '%s'", name))
+			continue
+		}
+		if normalizeTypeName(dbCol.Type.Name.Name) != normalizeTypeName(schemaCol.Type.Name.Name) { // .Name added
+			diffs = append(diffs, fmt.Sprintf("Column '%s': type mismatch (DB: %s, Schema: %s)", name, dbCol.Type.Name.Name, schemaCol.Type.Name.Name)) // .Name added
+		}
+		dbInlineCons := getInlineConstraints(dbCol.Constraints)
+		schemaInlineCons := getInlineConstraints(schemaCol.Constraints)
+		constraintsMatch, conDiff := compareConstraints(dbInlineCons, schemaInlineCons)
+		if !constraintsMatch {
+			diffs = append(diffs, fmt.Sprintf("Column '%s': %s", name, conDiff))
+		}
+		delete(schemaCols, name)
+	}
+	for name := range schemaCols {
+		diffs = append(diffs, fmt.Sprintf("Missing Schema column: '%s'", name))
+	}
+
+	dbTableConsMatch, tableConsDiff := compareConstraints(getTableLevelConstraints(dbStmt.Constraints), getTableLevelConstraints(schemaStmt.Constraints))
+	if !dbTableConsMatch {
+		diffs = append(diffs, fmt.Sprintf("Table-level constraints mismatch: %s", tableConsDiff))
+	}
+
+	if len(diffs) > 0 {
+		return statementMatchNoMatch, strings.Join(diffs, "; ")
+	}
+
+	if len(dbStmt.Columns) == len(schemaStmt.Columns) {
+		orderMatch := true
+		for i := range dbStmt.Columns {
+			if dbStmt.Columns[i].Name.Name != schemaStmt.Columns[i].Name.Name {
+				orderMatch = false
+				break
+			}
+		}
+		if !orderMatch {
+			return statementMatchReorderNeeded, "Column order differs"
+		}
+	}
+	return statementMatchExact, ""
+}
+
+func getInlineConstraints(constraints []rsql.Constraint) []rsql.Constraint {
+	var inline []rsql.Constraint
+	for _, c := range constraints {
+		switch c.(type) {
+		case *rsql.PrimaryKeyConstraint, *rsql.NotNullConstraint, *rsql.UniqueConstraint, *rsql.DefaultConstraint, *rsql.CheckConstraint, *rsql.ForeignKeyConstraint:
+			inline = append(inline, c)
+		}
+	}
+	return inline
+}
+
+func getTableLevelConstraints(constraints []rsql.Constraint) []rsql.Constraint {
+	var tableLevel []rsql.Constraint
+	for _, c := range constraints {
+		tableLevel = append(tableLevel, c)
+	}
+	return tableLevel
+}
+
+func masterRows(ctx context.Context, db DBReader) ([]masterRow, error) { // Changed DB to DBReader
 	var rows []masterRow
 	err := db.SelectContext(ctx, &rows, "SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
 	if err != nil {
@@ -52,15 +210,10 @@ type masterRow struct {
 	Sql  string `db:"sql"`
 }
 
-// the rsql parser quotes all identifiers. Given SQL statement structure, the first quoted text will be the name of the table, index, etc.
-var firstQuotedText = regexp.MustCompile(`"([^"]+)"`)
-
-// VerifyString reads the SQL from the provided string and verifies the database schema against it.
 func VerifyString(ctx context.Context, db DB, sql string) error {
 	return Verify(ctx, db, strings.NewReader(sql))
 }
 
-// Reads the file at DATABASE_SCHEMA and verifies the database schema against it.
 func VerifyFromEnv(ctx context.Context, db DB) error {
 	schemaFile, ok := gort.Env("DATABASE_SCHEMA")
 	if !ok {
@@ -74,60 +227,102 @@ func VerifyFromEnv(ctx context.Context, db DB) error {
 	return Verify(ctx, db, schema)
 }
 
-// Verify checks if the database schema matches the expected schema from the reader.
 func Verify(ctx context.Context, db DB, schema io.Reader) error {
-	masterRows, err := masterRows(ctx, db)
+	dbMasterRows, err := masterRows(ctx, db)
 	if err != nil {
-		return fmt.Errorf("could not get master rows: %w", err)
+		return fmt.Errorf("could not get master rows from DB: %w", err)
 	}
-	type entry struct {
-		sql   string
-		found bool
-	}
-	expected := make(map[string]entry)
-	for _, row := range masterRows {
+	dbObjectsMap := make(map[string]rsql.Statement)
+	dbObjectNames := make(map[string]struct{})
+	for _, row := range dbMasterRows {
 		parser := rsql.NewParser(strings.NewReader(row.Sql))
 		stmt, err := parser.ParseStatement()
 		if err != nil {
-			return fmt.Errorf("could not parse sql for table %s: %w", row.Name, err)
+			if strings.Contains(err.Error(), "unexpected token IDENT") && strings.Contains(row.Sql, "sqlite_sequence") {
+				continue
+			}
+			return fmt.Errorf("could not parse SQL for DB object %s (SQL: %s): %w", row.Name, row.Sql, err)
 		}
-		expected[row.Name] = entry{sql: stmt.String()}
+		dbObjectsMap[row.Name] = stmt
+		dbObjectNames[row.Name] = struct{}{}
 	}
-	parser := rsql.NewParser(schema)
+
+	schemaParser := rsql.NewParser(schema)
+	verifiedDbObjects := make(map[string]struct{})
 	for {
-		schemaStmt, err := parser.ParseStatement()
+		schemaStmt, err := schemaParser.ParseStatement()
 		if errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
-			return fmt.Errorf("could not parse sql: %w", err)
+			return fmt.Errorf("could not parse statement from input schema: %w", err)
 		}
 		switch schemaStmt.(type) {
 		case *rsql.InsertStatement, *rsql.UpdateStatement, *rsql.DeleteStatement, *rsql.SelectStatement:
-			// skip these statements
 			continue
 		}
-		schemaStmtStr := schemaStmt.String()
-		matches := firstQuotedText.FindStringSubmatch(schemaStmtStr)
-		if len(matches) < 2 {
-			return fmt.Errorf("could not find table name in statement: %s", schemaStmtStr)
+		schemaObjectName, err := getStatementName(schemaStmt)
+		if err != nil {
+			return fmt.Errorf("could not extract name from schema statement %s: %w", schemaStmt.String(), err)
 		}
-		tableName := matches[1]
-		entry, ok := expected[tableName]
-		if !ok {
-			return fmt.Errorf("table %s not found in schema", tableName)
-		} else if entry.sql != schemaStmtStr {
-			return fmt.Errorf("table %s sql does not match expected sql:\nexpected:\n%s\nfound:\n%s", tableName, entry.sql, schemaStmtStr)
-		} else {
-			entry.found = true
-			expected[tableName] = entry
+		dbStmt, found := dbObjectsMap[schemaObjectName]
+		if !found {
+			return fmt.Errorf("object '%s' from schema not found in database", schemaObjectName)
 		}
+		matchType, diffDescription, cmpErr := compareStatements(dbStmt, schemaStmt)
+		if cmpErr != nil {
+			return fmt.Errorf("error comparing object '%s': %w. DB SQL: %s, Schema SQL: %s", schemaObjectName, cmpErr, dbStmt.String(), schemaStmt.String())
+		}
+		if matchType != statementMatchExact {
+			return fmt.Errorf("schema mismatch for object '%s': %s. DB SQL: \n%s\nSchema SQL: \n%s", schemaObjectName, diffDescription, dbStmt.String(), schemaStmt.String())
+		}
+		verifiedDbObjects[schemaObjectName] = struct{}{}
 	}
-	for name, entry := range expected {
-		if !entry.found {
-			return fmt.Errorf("table %s not found in database", name)
+
+	for dbObjName := range dbObjectNames {
+		if _, isVerified := verifiedDbObjects[dbObjName]; !isVerified {
+			if strings.HasPrefix(dbObjName, "sqlite_") {
+				continue
+			}
+			extraStmtString := ""
+			if extraStmt, ok := dbObjectsMap[dbObjName]; ok {
+				extraStmtString = extraStmt.String()
+			}
+			return fmt.Errorf("object '%s' found in database but not in schema. DB SQL: \n%s", dbObjName, extraStmtString)
 		}
 	}
 	return nil
+}
+
+func getStatementName(stmt rsql.Statement) (string, error) {
+	switch s := stmt.(type) {
+	case *rsql.CreateTableStatement:
+		return s.Name.Name, nil // Removed .String()
+	case *rsql.CreateIndexStatement:
+		return s.Name.Name, nil // Use .Name for consistency, assuming Ident.Name is string
+	case *rsql.CreateViewStatement:
+		return s.Name.Name, nil // Changed to s.Name.Name
+	case *rsql.CreateTriggerStatement:
+		return s.Name.Name, nil // Use .Name for consistency
+	default:
+		return "", fmt.Errorf("unsupported statement type for name extraction: %T", stmt)
+	}
+}
+
+// getObjectType determines the type of a SQL object based on its statement.
+// This function was previously moved and then missing; restoring it here.
+func getObjectType(stmt rsql.Statement) string {
+	switch stmt.(type) {
+	case *rsql.CreateTableStatement:
+		return "TABLE"
+	case *rsql.CreateIndexStatement:
+		return "INDEX"
+	case *rsql.CreateViewStatement:
+		return "VIEW"
+	case *rsql.CreateTriggerStatement:
+		return "TRIGGER"
+	default:
+		return "OBJECT" // Fallback for unknown or unhandled types
+	}
 }
 
 // Donotes the version table is empty or non-existent.
@@ -185,21 +380,6 @@ type MigrationMap map[int]func(context.Context, DB) error
 type MigrationFunc func(context.Context, DB) error
 
 // Helper wrapper function for migration. Should be used unless you have good reason not to.
-//
-// db: db handle.
-//
-// version: The version number the function migrates from. The version will be automatically incremented after the function runs successfully.
-//
-// migrateTables: Nilable slice of tables that will be migrated.
-// see section 7: https://www.sqlite.org/lang_altertable.html
-// Contains tables that will follow the above pattern to migrate. The fn is expected to create tables named `new_<tableName>`
-// with the new structure. MigrateFunc will take care of all the steps outside of definining and populating the `new_<tableName>`'s.
-// The restore function passed to fn will handle the steps required after the new tables are set up.
-// If the fn does not call restore, it will be called after fn returns.
-// Indexes are re-created automically for migrated tables.
-// The section 7 steps are always followed even when migrateTables is empty. Restore will be a no-op in that case.
-//
-// fn: migration function
 func MigrateFunc(db DB, version int, migrateTables []string, fn func(tx Tx, restore func() error) error) MigrationFunc {
 	return func(ctx context.Context, db DB) error {
 		_, err := db.Exec("PRAGMA foreign_keys=OFF")
@@ -230,11 +410,11 @@ func MigrateFunc(db DB, version int, migrateTables []string, fn func(tx Tx, rest
 					return fmt.Errorf("could not get master rows: %w", err)
 				}
 				for _, tableName := range migrateTables {
-					_, err = tx.Exec("DROP TABLE " + tableName)
+					_, err = tx.Exec("DROP TABLE " + quoteIdent(tableName)) // Used local quoteIdent
 					if err != nil {
 						return err
 					}
-					_, err = tx.Exec(fmt.Sprintf("ALTER TABLE new_%s RENAME TO %s", tableName, tableName))
+					_, err = tx.Exec(fmt.Sprintf("ALTER TABLE %s RENAME TO %s", quoteIdent("new_"+tableName), quoteIdent(tableName))) // Used local quoteIdent
 					if err != nil {
 						return err
 					}
@@ -259,9 +439,9 @@ func MigrateFunc(db DB, version int, migrateTables []string, fn func(tx Tx, rest
 						if err != nil {
 							return fmt.Errorf("could not parse sql for master table %s: %w", tableInfo.Name, err)
 						}
-						var ok bool
-						tableInfo.Stmt, ok = stmt.(*rsql.CreateTableStatement)
-						if !ok {
+						var okStmt bool
+						tableInfo.Stmt, okStmt = stmt.(*rsql.CreateTableStatement)
+						if !okStmt {
 							return fmt.Errorf("%s's was not parsed as a create table statement: %T", tableInfo.Name, stmt)
 						}
 						tableInfo.Columns = make([]string, len(tableInfo.Stmt.Columns))
@@ -279,7 +459,7 @@ func MigrateFunc(db DB, version int, migrateTables []string, fn func(tx Tx, rest
 						s := masterStmt.(*rsql.CreateIndexStatement)
 						allPresent := true
 						for _, column := range s.Columns {
-							if !slices.Contains(masterInfo.Columns, column.X.String()) {
+							if !slices.Contains(tableInfo.Columns, column.X.String()) { // Use tableInfo.Columns from the *new* table
 								allPresent = false
 								break
 							}
@@ -290,7 +470,7 @@ func MigrateFunc(db DB, version int, migrateTables []string, fn func(tx Tx, rest
 								return fmt.Errorf("could not create index %s: %w", masterInfo.Name, err)
 							}
 						}
-					default:
+					default: // Other types like triggers, views associated with the table
 						_, err := tx.Exec(masterStmt.String())
 						if err != nil {
 							return fmt.Errorf("could not create %s %s: %w", masterInfo.Type, masterInfo.Name, err)
@@ -336,19 +516,16 @@ func MigrateFunc(db DB, version int, migrateTables []string, fn func(tx Tx, rest
 }
 
 // ExecString executes the SQL from the provided string in a transaction.
-// Supports multiple statements separated by semicolons.
 func ExecString(ctx context.Context, db DB, sql string) error {
 	return Exec(ctx, db, strings.NewReader(sql))
 }
 
 // ExecTxString executes the SQL from the provided string in a transaction.
-// Supports multiple statements separated by semicolons.
 func ExecTxString(tx Tx, sql string) error {
 	return ExecTx(tx, strings.NewReader(sql))
 }
 
 // Exec executes the SQL from the provided reader in a transaction.
-// Supports multiple statements separated by semicolons.
 func Exec(ctx context.Context, db DB, reader io.Reader) error {
 	return db.Txc(ctx, func(tx Tx) error {
 		return ExecTx(tx, reader)
@@ -356,46 +533,56 @@ func Exec(ctx context.Context, db DB, reader io.Reader) error {
 }
 
 // ExecTx executes the SQL from the provided reader in a transaction.
-// Supports multiple statements separated by semicolons.
 func ExecTx(tx Tx, reader io.Reader) error {
 	var buf []byte
 	scanner := bufio.NewReader(reader)
 	for {
 		chunk, err := scanner.ReadString(';')
 		if errors.Is(err, io.EOF) {
-			break
+			if len(strings.TrimSpace(chunk)) == 0 && len(buf) == 0 { // If EOF and chunk is empty or only whitespace
+				break
+			}
 		} else if err != nil {
 			return err
 		}
+		
+		currentStmt := ""
 		if strings.Contains(chunk, "CREATE TRIGGER") {
-			if !strings.HasSuffix(chunk, "END;") {
-				buf = append(buf, chunk...)
+			buf = append(buf, chunk...)
+			if !strings.HasSuffix(strings.TrimSpace(string(buf)), "END;") { // Check if the buffered content forms a complete trigger
 				continue
 			}
-		}
-		var stmt string
-		if len(buf) > 0 {
-			stmt = string(buf) + chunk
-			buf = buf[:0]
+			currentStmt = string(buf)
+			buf = buf[:0] // Reset buffer
 		} else {
-			stmt = chunk
+			currentStmt = chunk
 		}
 
-		for commentIndex := strings.Index(stmt, "--"); commentIndex != -1; commentIndex = strings.Index(stmt, "--") {
-			endOfComment := strings.Index(stmt[commentIndex:], "\n")
-			if endOfComment == -1 { //
-				buf = append(buf, stmt...)
-				stmt = stmt[:0]
-				break
+		// Remove comments from the current statement
+		// This is a simple comment remover, might need to be more robust for complex cases
+		var finalStmt strings.Builder
+		inComment := false
+		for i, r := range currentStmt {
+			if r == '-' && i+1 < len(currentStmt) && currentStmt[i+1] == '-' {
+				inComment = true
 			}
-			stmt = stmt[:commentIndex] + stmt[commentIndex+endOfComment+1:]
+			if !inComment {
+				finalStmt.WriteRune(r)
+			}
+			if r == '\n' {
+				inComment = false
+			}
 		}
-		if len(stmt) != 0 {
-			stmt = strings.TrimSpace(stmt)
-			_, err = tx.Exec(stmt)
+		
+		trimmedStmt := strings.TrimSpace(finalStmt.String())
+		if len(trimmedStmt) > 0 {
+			_, err = tx.Exec(trimmedStmt)
 			if err != nil {
-				return err
+				return fmt.Errorf("error executing statement: %s\n%w", trimmedStmt, err)
 			}
+		}
+		if errors.Is(err, io.EOF) { // Break after processing the last chunk if EOF was hit
+			break
 		}
 	}
 	return nil

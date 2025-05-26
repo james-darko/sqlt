@@ -1,13 +1,19 @@
 package sqlt_test
 
 import (
+	"fmt" // Keep for TestMigration
 	"strings"
 	"testing"
+	// "os" // No longer needed for t.Setenv
 
-	"github.com/james-darko/gort"
+	// "github.com/jmoiron/sqlx" // No longer needed here, getTestDB is in automigrate_test.go
+	"github.com/james-darko/gort" 
 	"github.com/james-darko/sqlt"
 	_ "github.com/mattn/go-sqlite3"
+	// "github.com/stretchr/testify/require" // Removed as getTestDB is no longer local
 )
+
+// getTestDB helper function removed, will use the one from automigrate_test.go
 
 const base = `
 CREATE TABLE version (
@@ -53,16 +59,13 @@ INSERT INTO table_3 (column1, column2) VALUES ('value1', 'value2');
 
 func TestVerifySuccess(t *testing.T) {
 	t.Parallel()
-	// Setup
-	db, err := sqlt.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
+	db := getTestDB(t) // Uses getTestDB from automigrate_test.go
 	defer db.Close()
-	ctx := gort.Context()
+	
+	ctx := gort.Context() 
 
 	// Init db
-	err = sqlt.ExecString(ctx, db, basePlus2)
+	err := sqlt.ExecString(ctx, db, basePlus2)
 	if err != nil {
 		t.Fatalf("Failed to setup test db: %v", err)
 	}
@@ -76,42 +79,36 @@ func TestVerifySuccess(t *testing.T) {
 
 func TestVerifyFailure(t *testing.T) {
 	t.Parallel()
-	// Setup
-	db, err := sqlt.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
+	db := getTestDB(t) // Uses getTestDB from automigrate_test.go
 	defer db.Close()
+
 	ctx := gort.Context()
 
 	// Init db
-	err = sqlt.ExecString(ctx, db, basePlus2)
+	err := sqlt.ExecString(ctx, db, basePlus2)
 	if err != nil {
 		t.Fatalf("Failed to setup test db: %v", err)
 	}
 
 	// Verify with a schema that has an extra table
 	err = sqlt.VerifyString(ctx, db, basePlus2+"\n"+table3)
+	expectedErrorSubstring := "object 'table_3' from schema not found in database"
 	if err == nil {
 		t.Fatal("Expected Verify to fail, but it succeeded")
-	}
-	if !strings.Contains(err.Error(), "table_3 not found") {
-		t.Fatalf("Verify failed with unexpected error: %v", err)
+	} else if !strings.Contains(err.Error(), expectedErrorSubstring) {
+		t.Fatalf("Verify failed with an unexpected error message: %v\nExpected substring: %s", err, expectedErrorSubstring)
 	}
 }
 
 func TestMigration(t *testing.T) {
 	t.Parallel()
-	// Setup
-	db, err := sqlt.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("Failed to open database: %v", err)
-	}
+	db := getTestDB(t) // Uses getTestDB from automigrate_test.go
 	defer db.Close()
+
 	ctx := gort.Context()
 
 	// Init db
-	err = sqlt.ExecString(ctx, db, basePlus2)
+	err := sqlt.ExecString(ctx, db, basePlus2)
 	if err != nil {
 		t.Fatalf("Failed to setup test db: %v", err)
 	}
@@ -119,7 +116,7 @@ func TestMigration(t *testing.T) {
 		1: sqlt.MigrateFunc(db, 1, []string{"table_2"}, func(tx sqlt.Tx, restore func() error) error {
 			err := sqlt.ExecTxString(tx, table3)
 			if err != nil {
-				t.Fatalf("Could not Exec addedTableSchema: %v", err)
+				return fmt.Errorf("Could not Exec addedTableSchema: %w", err)
 			}
 			return sqlt.ExecTxString(tx, table2NewWithRemovedColumn)
 		}),
