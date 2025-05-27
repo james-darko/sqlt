@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+
 	// "regexp" // Removed regexp import
 	"slices"
 	"strings"
@@ -27,7 +28,7 @@ func quoteIdent(ident string) string {
 }
 
 const (
-	statementMatchExact       = iota
+	statementMatchExact         = iota
 	statementMatchReorderNeeded // only for tables
 	statementMatchNoMatch
 )
@@ -212,6 +213,19 @@ type masterRow struct {
 
 func VerifyString(ctx context.Context, db DB, sql string) error {
 	return Verify(ctx, db, strings.NewReader(sql))
+}
+
+func ExecSchemaFromEnv(ctx context.Context, db DB) error {
+	schemaFile, ok := gort.Env("DATABASE_SCHEMA")
+	if !ok {
+		return fmt.Errorf("DATABASE_SCHEMA env var not found")
+	}
+	schema, err := os.Open(schemaFile)
+	if err != nil {
+		return fmt.Errorf("could not open schema file %s: %w", schemaFile, err)
+	}
+	defer schema.Close()
+	return Exec(ctx, db, schema)
 }
 
 func VerifyFromEnv(ctx context.Context, db DB) error {
@@ -545,7 +559,7 @@ func ExecTx(tx Tx, reader io.Reader) error {
 		} else if err != nil {
 			return err
 		}
-		
+
 		currentStmt := ""
 		if strings.Contains(chunk, "CREATE TRIGGER") {
 			buf = append(buf, chunk...)
@@ -573,7 +587,7 @@ func ExecTx(tx Tx, reader io.Reader) error {
 				inComment = false
 			}
 		}
-		
+
 		trimmedStmt := strings.TrimSpace(finalStmt.String())
 		if len(trimmedStmt) > 0 {
 			_, err = tx.Exec(trimmedStmt)
