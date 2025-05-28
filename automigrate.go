@@ -50,7 +50,7 @@ func AutoMigrate(ctx context.Context, db DB, schema io.Reader, allowTableDeletes
 		rebuiltTables := make(map[string]bool)
 		tablesToDropIfDisallowed := []string{} // Moved to top to collect all table drop violations
 
-		dbMasterRows, err := masterRows(ctx, tx)
+		dbMasterRows, err := masterRows(tx)
 		if err != nil {
 			return fmt.Errorf("AutoMigrate: could not get master rows from DB: %w", err)
 		}

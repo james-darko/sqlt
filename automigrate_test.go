@@ -26,7 +26,7 @@ func getTestDB(t *testing.T) sqlt.DB {
 func objectExists(t *testing.T, db sqlt.DBReader, objType string, objName string) bool {
 	var count int
 	query := fmt.Sprintf("SELECT COUNT(*) FROM sqlite_master WHERE type = '%s' AND name = '%s'", objType, objName)
-	err := db.GetContext(gort.Context(), &count, query) // Replaced context.Background()
+	err := db.Get(&count, query) // Replaced context.Background()
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false
@@ -39,7 +39,7 @@ func objectExists(t *testing.T, db sqlt.DBReader, objType string, objName string
 // Helper to get SQL definition of an object (can be shared)
 func getObjectSQL(t *testing.T, db sqlt.DBReader, objName string) string {
 	var sqlDef string
-	err := db.GetContext(gort.Context(), &sqlDef, "SELECT sql FROM sqlite_master WHERE name = ?", objName) // Replaced context.Background()
+	err := db.Get(&sqlDef, "SELECT sql FROM sqlite_master WHERE name = ?", objName) // Replaced context.Background()
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ""

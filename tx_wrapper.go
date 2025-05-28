@@ -73,8 +73,24 @@ func (tx *txWrapper) Get(dest any, query string, args ...any) error {
 	}
 	return nil
 }
+
 func (tx *txWrapper) MustGet(dest any, query string, args ...any) {
 	err := tx.Get(dest, query, args...)
+	if err != nil {
+		panic(Error{err})
+	}
+}
+
+func (tx *txWrapper) GetIn(dest any, query string, args ...any) error {
+	p, q, err := sqlx.In(query, args...)
+	if err != nil {
+		return err
+	}
+	return tx.tx.Get(dest, p, q...)
+}
+
+func (tx *txWrapper) MustGetIn(dest any, query string, args ...any) {
+	err := tx.GetIn(dest, query, args...)
 	if err != nil {
 		panic(Error{err})
 	}

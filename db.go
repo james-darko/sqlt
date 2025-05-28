@@ -31,7 +31,9 @@ type DB interface {
 	DriverName() string
 	BindNamed(query string, arg any) (string, []any, error)
 	Get(dest any, query string, args ...any) error
+	GetIn(dest any, query string, args ...any) error
 	GetContext(ctx context.Context, dest any, query string, args ...any) error
+	GetInContext(ctx context.Context, dest any, query string, args ...any) error
 	Select(dest any, query string, args ...any) error
 	SelectContext(ctx context.Context, dest any, query string, args ...any) error
 	NamedExec(query string, arg any) (sql.Result, error)
@@ -46,8 +48,8 @@ type DB interface {
 
 // DBReader is an interface for reading from the database, implemented by DB and Tx.
 type DBReader interface {
-	GetContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error
-	SelectContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error
+	Get(dest any, query string, args ...any) error
+	Select(dest any, query string, args ...any) error
 }
 
 type sqlxDB struct {
@@ -104,6 +106,22 @@ func (s *sqlxDB) BindNamed(query string, arg any) (string, []any, error) {
 
 func (s *sqlxDB) Get(dest any, query string, args ...any) error {
 	return s.db.Get(dest, query, args...)
+}
+
+func (s *sqlxDB) GetIn(dest any, query string, args ...any) error {
+	q, p, err := sqlx.In(query, args...)
+	if err != nil {
+		return err
+	}
+	return s.db.GetContext(context.Background(), dest, q, p...)
+}
+
+func (s *sqlxDB) GetInContext(ctx context.Context, dest any, query string, args ...any) error {
+	q, p, err := sqlx.In(query, args...)
+	if err != nil {
+		return err
+	}
+	return s.db.GetContext(ctx, dest, q, p...)
 }
 
 func (s *sqlxDB) GetContext(ctx context.Context, dest any, query string, args ...any) error {

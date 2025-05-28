@@ -197,9 +197,9 @@ func getTableLevelConstraints(constraints []rsql.Constraint) []rsql.Constraint {
 	return tableLevel
 }
 
-func masterRows(ctx context.Context, db DBReader) ([]masterRow, error) { // Changed DB to DBReader
+func masterRows(db DBReader) ([]masterRow, error) { // Changed DB to DBReader
 	var rows []masterRow
-	err := db.SelectContext(ctx, &rows, "SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
+	err := db.Select(&rows, "SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +242,7 @@ func VerifyFromEnv(ctx context.Context, db DB) error {
 }
 
 func Verify(ctx context.Context, db DB, schema io.Reader) error {
-	dbMasterRows, err := masterRows(ctx, db)
+	dbMasterRows, err := masterRows(db)
 	if err != nil {
 		return fmt.Errorf("could not get master rows from DB: %w", err)
 	}
