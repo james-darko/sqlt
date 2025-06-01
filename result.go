@@ -9,7 +9,7 @@ type Result interface {
 	// MustLastInsertId returns the last inserted ID.
 	// It is only valid after an INSERT statement.
 	// It panics if the last inserted ID is not available.
-	MustLastInsertId() int64
+	// MustLastInsertId() int64
 
 	// RowsAffected returns the number of rows affected by the last statement.
 	// It is only valid after an UPDATE or DELETE statement.
@@ -17,7 +17,7 @@ type Result interface {
 	// MustRowsAffected returns the number of rows affected by the last statement.
 	// It is only valid after an UPDATE or DELETE statement.
 	// It panics if the number of rows affected is not available.
-	MustRowsAffected() int64
+	// MustRowsAffected() int64
 }
 
 type sqltResult struct {
