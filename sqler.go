@@ -2,9 +2,11 @@ package sqlt
 
 import "github.com/jmoiron/sqlx"
 
-// Handle interface that both DB and Tx implement.
-type Handle interface {
+// Sqler interface that both DB and Tx implement.
+type Sqler interface {
 	Exec(query string, args ...any) (Result, error)
+	IDExec(query string, args ...any) (int64, error)
+	AffectedExec(query string, args ...any) (int, error)
 	Query(query string, args ...any) (*sqlx.Rows, error)
 	QueryRow(query string, args ...any) *sqlx.Row
 	Get(dest any, query string, args ...any) error

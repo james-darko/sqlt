@@ -13,6 +13,8 @@ type Tx interface {
 	// Rollback() error
 	Exec(query string, args ...any) (Result, error)
 	MustExec(query string, args ...any) Result
+	IDExec(query string, args ...any) (int64, error)
+	AffectedExec(query string, args ...any) (int, error)
 	Query(query string, args ...any) (*sqlx.Rows, error)
 	MustQuery(query string, args ...any) *sqlx.Rows
 	QueryRow(query string, args ...any) *sqlx.Row
@@ -60,6 +62,30 @@ func (tx *sqlxTx) MustExec(query string, args ...any) Result {
 		panic(Error{err})
 	}
 	return sqltResult{res}
+}
+
+func (tx *sqlxTx) IDExec(query string, args ...any) (int64, error) {
+	r, err := tx.conn.ExecContext(tx.ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	id, err := r.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get last insert id: %w", err)
+	}
+	return id, nil
+}
+
+func (tx *sqlxTx) AffectedExec(query string, args ...any) (int, error) {
+	r, err := tx.conn.ExecContext(tx.ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := r.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get affected rows: %w", err)
+	}
+	return int(affected), nil
 }
 
 func (tx *sqlxTx) Query(query string, args ...any) (*sqlx.Rows, error) {

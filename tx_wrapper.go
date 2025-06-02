@@ -34,6 +34,30 @@ func (tx *txWrapper) MustExec(query string, args ...any) Result {
 	return sqltResult{res}
 }
 
+func (tx *txWrapper) IDExec(query string, args ...any) (int64, error) {
+	r, err := tx.tx.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	id, err := r.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func (tx *txWrapper) AffectedExec(query string, args ...any) (int, error) {
+	r, err := tx.tx.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	rowsAffected, err := r.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(rowsAffected), nil
+}
+
 func (tx *txWrapper) Query(query string, args ...any) (*sqlx.Rows, error) {
 	r, err := tx.tx.Queryx(query, args...)
 	if err != nil {

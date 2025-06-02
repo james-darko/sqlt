@@ -23,6 +23,10 @@ type DB interface {
 	SQLX() *sqlx.DB
 	Exec(query string, args ...any) (Result, error)
 	ExecContext(ctx context.Context, query string, args ...any) (Result, error)
+	IDExec(query string, args ...any) (int64, error)
+	IDExecContext(ctx context.Context, query string, args ...any) (int64, error)
+	AffectedExec(query string, args ...any) (int, error)
+	AffectedExecContext(ctx context.Context, query string, args ...any) (int, error)
 	Query(query string, args ...any) (*sqlx.Rows, error)
 	QueryRow(query string, args ...any) *sqlx.Row
 	Prepare(query string) (*sqlx.Stmt, error)
@@ -35,6 +39,7 @@ type DB interface {
 	GetContext(ctx context.Context, dest any, query string, args ...any) error
 	GetInContext(ctx context.Context, dest any, query string, args ...any) error
 	Select(dest any, query string, args ...any) error
+	SelectIn(dest any, query string, args ...any) error
 	SelectContext(ctx context.Context, dest any, query string, args ...any) error
 	NamedExec(query string, arg any) (sql.Result, error)
 	NamedQuery(query string, arg any) (*sqlx.Rows, error)
@@ -53,7 +58,8 @@ type DBReader interface {
 }
 
 type sqlxDB struct {
-	db *sqlx.DB
+	db         *sqlx.DB
+	immidateDB *sqlx.DB
 }
 
 func (s *sqlxDB) SQLX() *sqlx.DB {
@@ -74,6 +80,54 @@ func (s *sqlxDB) ExecContext(ctx context.Context, query string, args ...any) (Re
 		return nil, err
 	}
 	return sqltResult{r}, nil
+}
+
+func (s *sqlxDB) IDExec(query string, args ...any) (int64, error) {
+	r, err := s.db.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	id, err := r.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func (s *sqlxDB) IDExecContext(ctx context.Context, query string, args ...any) (int64, error) {
+	r, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	id, err := r.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func (s *sqlxDB) AffectedExec(query string, args ...any) (int, error) {
+	r, err := s.db.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	rowsAffected, err := r.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(rowsAffected), nil
+}
+
+func (s *sqlxDB) AffectedExecContext(ctx context.Context, query string, args ...any) (int, error) {
+	r, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	rowsAffected, err := r.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(rowsAffected), nil
 }
 
 func (s *sqlxDB) Query(query string, args ...any) (*sqlx.Rows, error) {
@@ -130,6 +184,14 @@ func (s *sqlxDB) GetContext(ctx context.Context, dest any, query string, args ..
 
 func (s *sqlxDB) Select(dest any, query string, args ...any) error {
 	return s.db.Select(dest, query, args...)
+}
+
+func (s *sqlxDB) SelectIn(dest any, query string, args ...any) error {
+	q, p, err := sqlx.In(query, args...)
+	if err != nil {
+		return err
+	}
+	return s.db.SelectContext(context.Background(), dest, q, p...)
 }
 
 func (s *sqlxDB) SelectContext(ctx context.Context, dest any, query string, args ...any) error {
