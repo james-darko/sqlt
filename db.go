@@ -3,6 +3,9 @@ package sqlt
 import (
 	"context"
 	"database/sql"
+	"strings"
+	"sync/atomic"
+	"unicode"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -16,7 +19,38 @@ func Open(driverName, dataSourceName string) (DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	mapper := defaultMapper.Load()
+	if mapper != nil {
+		db.MapperFunc(*mapper)
+	}
 	return &sqlxDB{db: db}, nil
+}
+
+func SetDefaultMapper(mapper func(string) string) {
+	defaultMapper.Store(&mapper)
+}
+
+func init() {
+	defaultMapper.Store(&camalCaseMapper)
+}
+
+var defaultMapper atomic.Pointer[func(string) string]
+
+var camalCaseMapper = func(s string) string {
+	var buf strings.Builder
+	buf.Grow(len(s) + 3)
+	for i, r := range s {
+		if unicode.IsUpper(r) {
+			buf.WriteRune(unicode.ToLower(r))
+			// Handles acronyms like HTTP, API, etc.
+			if i > 0 && i+1 < len(s) && unicode.IsLower(rune(s[i+1])) {
+				buf.WriteByte('_')
+			}
+		} else {
+			buf.WriteRune(r)
+		}
+	}
+	return buf.String()
 }
 
 type DB interface {
