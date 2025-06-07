@@ -26,6 +26,8 @@ type Tx interface {
 	Select(dest any, query string, args ...any) error
 	MustSelect(dest any, query string, args ...any)
 	SelectIn(dest any, query string, args ...any) error
+	SelectSeq(query string, args ...any) *RowsSeq
+	SelectInSeq(query string, args ...any) *RowsSeq
 	MustSelectIn(dest any, query string, args ...any)
 	NamedExec(query string, arg any) (Result, error)
 	// Prepare(query string) (*sql.Stmt, error)

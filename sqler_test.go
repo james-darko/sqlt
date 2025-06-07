@@ -5,9 +5,13 @@ import (
 )
 
 func TestImplementations(t *testing.T) {
-	var _ Sqler = &sqlxDB{}
-	var _ DB = &sqlxDB{}
-	var _ Sqler = &txWrapper{}
-	var _ Tx = &txWrapper{}
-	var _ Result = &sqltResult{}
+	// just needs to compile
+	db := &sqlxDB{}
+	var _ DB = db
+	var _ Sqler = db
+	tx := &txWrapper{}
+	var _ Tx = tx
+	var _ Sqler = tx
+	var r = &sqltResult{}
+	var _ Result = r
 }
