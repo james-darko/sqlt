@@ -15,8 +15,8 @@ type Sqler interface {
 	GetIn(dest any, query string, args ...any) error
 	Select(dest any, query string, args ...any) error
 	SelectIn(dest any, query string, args ...any) error
-	SelectSeq(query string, args ...any) RowsSeq
-	SelectInSeq(query string, args ...any) RowsSeq
+	SelectSeq(query string, args ...any) *RowsSeq
+	SelectInSeq(query string, args ...any) *RowsSeq
 }
 
 // If err is not nil, it panics with the error wrapped in the sqlt.Error type.
