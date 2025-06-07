@@ -75,6 +75,8 @@ type DB interface {
 	Select(dest any, query string, args ...any) error
 	SelectIn(dest any, query string, args ...any) error
 	SelectContext(ctx context.Context, dest any, query string, args ...any) error
+	SelectInSeq(query string, args ...any) RowsSeq
+	SelectSeq(query string, args ...any) RowsSeq
 	NamedExec(query string, arg any) (sql.Result, error)
 	NamedQuery(query string, arg any) (*sqlx.Rows, error)
 	Close() error
@@ -226,6 +228,26 @@ func (s *sqlxDB) SelectIn(dest any, query string, args ...any) error {
 		return err
 	}
 	return s.db.SelectContext(context.Background(), dest, q, p...)
+}
+
+func (s *sqlxDB) SelectInSeq(query string, args ...any) RowsSeq {
+	q, p, err := sqlx.In(query, args...)
+	if err != nil {
+		return RowsSeq{err: err}
+	}
+	rows, err := s.db.Queryx(q, p...)
+	return RowsSeq{
+		rows: rows,
+		err:  err,
+	}
+}
+
+func (s *sqlxDB) SelectSeq(query string, args ...any) RowsSeq {
+	rows, err := s.db.Queryx(query, args...)
+	return RowsSeq{
+		rows: rows,
+		err:  err,
+	}
 }
 
 func (s *sqlxDB) SelectContext(ctx context.Context, dest any, query string, args ...any) error {

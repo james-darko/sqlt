@@ -128,6 +128,26 @@ func (tx *txWrapper) Select(dest any, query string, args ...any) error {
 	return nil
 }
 
+func (tx *txWrapper) SelectSeq(query string, args ...any) RowsSeq {
+	rows, err := tx.Query(query, args...)
+	return RowsSeq{
+		rows: rows,
+		err:  err,
+	}
+}
+
+func (tx *txWrapper) SelectInSeq(query string, args ...any) RowsSeq {
+	p, q, err := sqlx.In(query, args...)
+	if err != nil {
+		return RowsSeq{err: err}
+	}
+	rows, err := tx.Query(p, q...)
+	return RowsSeq{
+		rows: rows,
+		err:  err,
+	}
+}
+
 func (tx *txWrapper) MustSelect(dest any, query string, args ...any) {
 	err := tx.Select(dest, query, args...)
 	if err != nil {
