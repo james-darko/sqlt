@@ -36,7 +36,7 @@ func transaction(ctx context.Context, db *sqlx.DB, imm bool, fn func(conn Tx) er
 	err = fn(t)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			return fmt.Errorf("failed to rollback transaction: %w", rollbackErr)
+			return fmt.Errorf("failed to rollback transaction: %w - %w", rollbackErr, err)
 		}
 		return err
 	} else {
