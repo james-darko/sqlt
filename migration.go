@@ -1,7 +1,6 @@
 package sqlt
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"errors"
@@ -548,55 +547,15 @@ func Exec(ctx context.Context, db DB, reader io.Reader) error {
 
 // ExecTx executes the SQL from the provided reader in a transaction.
 func ExecTx(tx Tx, reader io.Reader) error {
-	var buf []byte
-	scanner := bufio.NewReader(reader)
+	parser := rsql.NewParser(reader)
 	for {
-		chunk, err := scanner.ReadString(';')
+		stmt, err := parser.ParseStatement()
 		if errors.Is(err, io.EOF) {
-			if len(strings.TrimSpace(chunk)) == 0 && len(buf) == 0 { // If EOF and chunk is empty or only whitespace
-				break
-			}
-		} else if err != nil {
-			return err
-		}
-
-		currentStmt := ""
-		if strings.Contains(chunk, "CREATE TRIGGER") {
-			buf = append(buf, chunk...)
-			if !strings.HasSuffix(strings.TrimSpace(string(buf)), "END;") { // Check if the buffered content forms a complete trigger
-				continue
-			}
-			currentStmt = string(buf)
-			buf = buf[:0] // Reset buffer
-		} else {
-			currentStmt = chunk
-		}
-
-		// Remove comments from the current statement
-		// This is a simple comment remover, might need to be more robust for complex cases
-		var finalStmt strings.Builder
-		inComment := false
-		for i, r := range currentStmt {
-			if r == '-' && i+1 < len(currentStmt) && currentStmt[i+1] == '-' {
-				inComment = true
-			}
-			if !inComment {
-				finalStmt.WriteRune(r)
-			}
-			if r == '\n' {
-				inComment = false
-			}
-		}
-
-		trimmedStmt := strings.TrimSpace(finalStmt.String())
-		if len(trimmedStmt) > 0 {
-			_, err = tx.Exec(trimmedStmt)
-			if err != nil {
-				return fmt.Errorf("error executing statement: %s\n%w", trimmedStmt, err)
-			}
-		}
-		if errors.Is(err, io.EOF) { // Break after processing the last chunk if EOF was hit
 			break
+		}
+		_, err = tx.Exec(stmt.String())
+		if err != nil {
+			return fmt.Errorf("error executing statement: %s\n%w", stmt.String(), err)
 		}
 	}
 	return nil
