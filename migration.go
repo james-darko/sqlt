@@ -546,7 +546,20 @@ func Exec(ctx context.Context, db DB, reader io.Reader) error {
 }
 
 // ExecTx executes the SQL from the provided reader in a transaction.
-func ExecTx(tx Tx, reader io.Reader) error {
+func ExecTx(tx Tx, reader io.Reader) (err error) {
+	var last rsql.Statement
+	defer func() {
+		if r := recover(); r != nil {
+			if last != nil {
+				fmt.Printf("last successful statement: %s\n", last.String())
+			}
+			if e, ok := r.(error); ok {
+				err = e
+			} else {
+				err = fmt.Errorf("recovered rsql panic: %v", r)
+			}
+		}
+	}()
 	parser := rsql.NewParser(reader)
 	for {
 		stmt, err := parser.ParseStatement()
@@ -555,9 +568,10 @@ func ExecTx(tx Tx, reader io.Reader) error {
 		}
 		_, err = tx.Exec(stmt.String())
 		if err != nil {
+			fmt.Printf("last successful statement: %s\n", last.String())
 			return fmt.Errorf("error executing statement: %s\n%w", stmt.String(), err)
 		}
-		fmt.Printf("executed statement: %s\n", stmt.String())
+		last = stmt
 	}
 	return nil
 }
