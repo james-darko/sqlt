@@ -552,6 +552,9 @@ func ExecTx(tx Tx, reader io.Reader) error {
 		stmt, err := parser.ParseStatement()
 		if errors.Is(err, io.EOF) {
 			break
+		} else if stmt == nil {
+			fmt.Println("nil statement")
+			break
 		}
 		_, err = tx.Exec(stmt.String())
 		if err != nil {
