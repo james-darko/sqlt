@@ -1,7 +1,6 @@
 package sqlt
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"errors"
@@ -546,89 +545,94 @@ func Exec(ctx context.Context, db DB, reader io.Reader) error {
 	})
 }
 
-func ExecTx(tx Tx, reader io.Reader) error {
-	var buf []byte
-	scanner := bufio.NewReader(reader)
-	for {
-		chunk, err := scanner.ReadString(';')
-		if errors.Is(err, io.EOF) {
-			if len(strings.TrimSpace(chunk)) == 0 && len(buf) == 0 { // If EOF and chunk is empty or only whitespace
-				break
-			}
-		} else if err != nil {
-			return err
-		}
-
-		currentStmt := ""
-		if strings.Contains(chunk, "CREATE TRIGGER") {
-			buf = append(buf, chunk...)
-			if !strings.HasSuffix(strings.TrimSpace(string(buf)), "END;") { // Check if the buffered content forms a complete trigger
-				continue
-			}
-			currentStmt = string(buf)
-			buf = buf[:0] // Reset buffer
-		} else {
-			currentStmt = chunk
-		}
-
-		// Remove comments from the current statement
-		// This is a simple comment remover, might need to be more robust for complex cases
-		var finalStmt strings.Builder
-		inComment := false
-		for i, r := range currentStmt {
-			if r == '-' && i+1 < len(currentStmt) && currentStmt[i+1] == '-' {
-				inComment = true
-			}
-			if !inComment {
-				finalStmt.WriteRune(r)
-			}
-			if r == '\n' {
-				inComment = false
-			}
-		}
-
-		trimmedStmt := strings.TrimSpace(finalStmt.String())
-		if len(trimmedStmt) > 0 {
-			_, err = tx.Exec(trimmedStmt)
-			if err != nil {
-				return fmt.Errorf("error executing statement: %s\n%w", trimmedStmt, err)
-			}
-		}
-		if errors.Is(err, io.EOF) { // Break after processing the last chunk if EOF was hit
-			break
-		}
-	}
-	return nil
-}
-
-// ExecTx executes the SQL from the provided reader in a transaction.
-// func ExecTx(tx Tx, reader io.Reader) (err error) {
-// 	var last rsql.Statement
-// 	defer func() {
-// 		if r := recover(); r != nil {
-// 			if last != nil {
-// 				fmt.Printf("last successful statement: %s\n", last.String())
+// func ExecTx(tx Tx, reader io.Reader) error {
+// 	var buf []byte
+// 	scanner := bufio.NewReader(reader)
+// 	for {
+// 		chunk, err := scanner.ReadString(';')
+// 		if errors.Is(err, io.EOF) {
+// 			if len(strings.TrimSpace(chunk)) == 0 && len(buf) == 0 { // If EOF and chunk is empty or only whitespace
+// 				break
 // 			}
-// 			if e, ok := r.(error); ok {
-// 				err = e
-// 			} else {
-// 				err = fmt.Errorf("recovered rsql panic: %v", r)
+// 		} else if err != nil {
+// 			return err
+// 		}
+//
+// 		if strings.Count(chunk, "'")%2 != 0 {
+// 			buf = append(buf, chunk...)
+// 			continue
+// 		}
+//
+// 		currentStmt := ""
+// 		if strings.Contains(chunk, "CREATE TRIGGER") {
+// 			buf = append(buf, chunk...)
+// 			if !strings.HasSuffix(strings.TrimSpace(string(buf)), "END;") { // Check if the buffered content forms a complete trigger
+// 				continue
+// 			}
+// 			currentStmt = string(buf)
+// 			buf = buf[:0] // Reset buffer
+// 		} else {
+// 			currentStmt = chunk
+// 		}
+//
+// 		// Remove comments from the current statement
+// 		// This is a simple comment remover, might need to be more robust for complex cases
+// 		var finalStmt strings.Builder
+// 		inComment := false
+// 		for i, r := range currentStmt {
+// 			if r == '-' && i+1 < len(currentStmt) && currentStmt[i+1] == '-' {
+// 				inComment = true
+// 			}
+// 			if !inComment {
+// 				finalStmt.WriteRune(r)
+// 			}
+// 			if r == '\n' {
+// 				inComment = false
 // 			}
 // 		}
-// 	}()
-// 	parser := rsql.NewParser(reader)
-// 	for {
-// 		stmt, err := parser.ParseStatement()
-// 		if errors.Is(err, io.EOF) || stmt == nil {
+//
+// 		trimmedStmt := strings.TrimSpace(finalStmt.String())
+// 		if len(trimmedStmt) > 0 {
+// 			_, err = tx.Exec(trimmedStmt)
+// 			if err != nil {
+// 				return fmt.Errorf("error executing statement: %s\n%w", trimmedStmt, err)
+// 			}
+// 		}
+// 		if errors.Is(err, io.EOF) { // Break after processing the last chunk if EOF was hit
 // 			break
 // 		}
-// 		fmt.Printf("executing statement: %s\n", stmt.String())
-// 		_, err = tx.Exec(stmt.String())
-// 		if err != nil {
-// 			fmt.Printf("last successful statement: %s\n", last.String())
-// 			return fmt.Errorf("error executing statement: %s\n%w", stmt.String(), err)
-// 		}
-// 		last = stmt
 // 	}
 // 	return nil
 // }
+
+// ExecTx executes the SQL from the provided reader in a transaction.
+func ExecTx(tx Tx, reader io.Reader) (err error) {
+	var last rsql.Statement
+	defer func() {
+		if r := recover(); r != nil {
+			if last != nil {
+				fmt.Printf("last successful statement: %s\n", last.String())
+			}
+			if e, ok := r.(error); ok {
+				err = e
+			} else {
+				err = fmt.Errorf("recovered rsql panic: %v", r)
+			}
+		}
+	}()
+	parser := rsql.NewParser(reader)
+	for {
+		stmt, err := parser.ParseStatement()
+		if errors.Is(err, io.EOF) || stmt == nil {
+			break
+		}
+		fmt.Printf("executing statement: %s\n", stmt.String())
+		_, err = tx.Exec(stmt.String())
+		if err != nil {
+			fmt.Printf("last successful statement: %s\n", last.String())
+			return fmt.Errorf("error executing statement: %s\n%w", stmt.String(), err)
+		}
+		last = stmt
+	}
+	return nil
+}
