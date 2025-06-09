@@ -626,10 +626,8 @@ func ExecTx(tx Tx, reader io.Reader) (err error) {
 		if errors.Is(err, io.EOF) || stmt == nil {
 			break
 		}
-		fmt.Printf("executing statement: %s\n", stmt.String())
 		_, err = tx.Exec(stmt.String())
 		if err != nil {
-			fmt.Printf("last successful statement: %s\n", last.String())
 			return fmt.Errorf("error executing statement: %s\n%w", stmt.String(), err)
 		}
 		last = stmt
