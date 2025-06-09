@@ -15,16 +15,18 @@ func transaction(ctx context.Context, db *sqlx.DB, imm bool, fn func(conn Tx) er
 	}
 
 	defer func() {
-		if err := recover(); err != nil {
+		if panicValue := recover(); panicValue != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				fmt.Printf("failed to rollback transaction in panic: %v", rollbackErr)
 			}
-			var e Error
-			if ok := errors.As(err.(error), &e); ok {
-				rErr = e
-			} else {
-				panic(err) // Re-panic to propagate the error
+			if err, ok := panicValue.(error); ok {
+				var e Error
+				if ok := errors.As(err, &e); ok {
+					rErr = e
+					return
+				}
 			}
+			panic(panicValue) // Re-panic to propagate the error
 		}
 	}()
 	if imm {
