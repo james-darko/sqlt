@@ -550,15 +550,14 @@ func ExecTx(tx Tx, reader io.Reader) error {
 	parser := rsql.NewParser(reader)
 	for {
 		stmt, err := parser.ParseStatement()
-		if errors.Is(err, io.EOF) {
+		if errors.Is(err, io.EOF) || stmt == nil {
 			break
-		} else if stmt == nil {
-			continue
 		}
 		_, err = tx.Exec(stmt.String())
 		if err != nil {
 			return fmt.Errorf("error executing statement: %s\n%w", stmt.String(), err)
 		}
+		fmt.Printf("executed statement: %s\n", stmt.String())
 	}
 	return nil
 }
