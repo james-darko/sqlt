@@ -553,8 +553,7 @@ func ExecTx(tx Tx, reader io.Reader) error {
 		if errors.Is(err, io.EOF) {
 			break
 		} else if stmt == nil {
-			fmt.Println("nil statement")
-			break
+			continue
 		}
 		_, err = tx.Exec(stmt.String())
 		if err != nil {
