@@ -606,7 +606,7 @@ func Exec(ctx context.Context, db DB, reader io.Reader) error {
 // }
 
 // ExecTx executes the SQL from the provided reader in a transaction.
-func ExecTx(tx Tx, reader io.Reader) (err error) {
+func ExecTx(tx Sqler, reader io.Reader) (err error) {
 	var last rsql.Statement
 	defer func() {
 		if r := recover(); r != nil {
